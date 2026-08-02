@@ -3,9 +3,9 @@
 // 원칙: 아직 그리지 않은 것 = 선, 그린 것 = 면.
 // 그래서 바닥은 끝까지 선으로만 남고, 채워지는 것은 판뿐이다.
 
-import { GRID_W, GRID_H, PLATE_T, COLOR } from './config.js';
+import { GRID_W, GRID_H, PLATE_T, INK_MAX, VIEW_MARGIN, COLOR } from './config.js';
 import { worldToScreen, tileDiamond, depthKey, view } from './iso.js';
-import { board, parseKey } from './board.js';
+import { board, parseKey, inkAvailable } from './board.js';
 
 export function clear(ctx, w, h) {
   ctx.fillStyle = COLOR.bg;
@@ -119,6 +119,42 @@ export function drawStroke(ctx) {
     polygon(ctx, tileDiamond(c.x, c.y));
     ctx.fill();
   }
+  ctx.restore();
+}
+
+// 잉크 게이지.
+//
+// 두 단계로 그린다. 옅은 앰버가 확정된 잉크, 진한 앰버가 지금 실제로 쓸 수
+// 있는 양이다. 획을 긋는 동안 그 차이만큼이 "이번 획이 먹을 몫"으로 보인다.
+// 손을 떼면 옅은 부분이 사라지며 확정된다.
+//
+// 숫자를 쓰지 않는다. 대사도 문구도 없는 게임이므로 남은 양은 길이로만 읽힌다.
+//
+// 좌측 하단. 판은 화면 중앙에 놓이므로 모서리로 밀어 두어야 시선을 뺏지 않고,
+// 여백도 판을 담고 남은 자리라 겹칠 일이 없다.
+export function drawInkGauge(ctx, viewW, viewH) {
+  const w = Math.min(320, viewW * 0.4);
+  const h = 6;
+  const x = VIEW_MARGIN;
+  const y = viewH - VIEW_MARGIN - h;
+
+  const committed = Math.max(0, board.ink) / INK_MAX;
+  const available = Math.max(0, inkAvailable()) / INK_MAX;
+
+  ctx.save();
+
+  ctx.strokeStyle = COLOR.gridEdge;
+  ctx.globalAlpha = 0.5;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
+
+  ctx.fillStyle = COLOR.amber;
+  ctx.globalAlpha = 0.3;
+  ctx.fillRect(x, y, w * committed, h);
+
+  ctx.globalAlpha = 1;
+  ctx.fillRect(x, y, w * available, h);
+
   ctx.restore();
 }
 

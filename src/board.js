@@ -7,7 +7,7 @@
 // 이 분리가 있어야 획 도중 취소가 판을 건드리지 않고,
 // 나중에 잉크 게이지도 "쓴 잉크 + 긋는 중인 획"으로 미리보기가 나온다.
 
-import { GRID_W, GRID_H } from './config.js';
+import { GRID_W, GRID_H, INK_COST, INK_REFUND, INK_MAX } from './config.js';
 
 export const key = (x, y) => x + ',' + y;
 
@@ -24,7 +24,17 @@ export const board = {
   plates: [],
   stroke: new Set(),      // 긋는 중인 칸들
   occupied: new Set(),    // 바닥(z=0)이 이미 판에 덮인 칸들
+  ink: INK_MAX,           // 확정된 잉크. 긋는 중인 획은 아직 여기서 빠지지 않는다
 };
+
+// 지금 실제로 쓸 수 있는 잉크.
+//
+// 긋는 중인 획은 board.ink 를 건드리지 않고 여기서만 빠진다.
+// 덕분에 Esc 취소가 되돌릴 것이 없고(깎은 적이 없으므로),
+// 게이지는 확정 잉크와 이번 획이 먹을 몫을 따로 그릴 수 있다.
+export function inkAvailable() {
+  return board.ink - board.stroke.size * INK_COST;
+}
 
 // 획을 잇는 기준. 대각을 포함한다.
 //
@@ -69,8 +79,17 @@ export function extendStroke(cell) {
 
 function paint(x, y) {
   if (!inBounds(x, y)) return;
-  if (board.occupied.has(key(x, y))) return;  // 이미 판이 깔린 자리
-  board.stroke.add(key(x, y));
+
+  const k = key(x, y);
+  if (board.occupied.has(k)) return;   // 이미 판이 깔린 자리
+  if (board.stroke.has(k)) return;     // 이번 획에 이미 포함된 칸은 공짜
+
+  // 잉크가 다하면 그 지점에서 획이 멈춘다. 획 전체를 거부하면 왜 안 되는지
+  // 보이지 않아 답답하지만, 긋다가 선이 안 나오는 것은 펜에서 잉크가
+  // 떨어지는 현상 그대로라 설명 없이 이해된다.
+  if (inkAvailable() < INK_COST) return;
+
+  board.stroke.add(k);
 }
 
 export function cancelStroke() {
@@ -84,6 +103,9 @@ export function cancelStroke() {
 // 판 하나를 집어 올렸을 때 화면 반대편 조각이 같이 떠오른다.
 export function commitStroke() {
   const made = [];
+
+  // 잉크는 여기서 처음 깎인다. 긋는 동안에는 inkAvailable() 로만 빠져 있었다.
+  board.ink -= board.stroke.size * INK_COST;
 
   for (const group of components(board.stroke)) {
     const plate = { cells: group, z: 0 };
@@ -130,6 +152,11 @@ function erase(x, y) {
   const k = key(x, y);
   if (!board.occupied.has(k)) return;
   board.occupied.delete(k);
+
+  // 절반만 돌아온다. 지우기는 즉시 반영이므로 환급도 여기서 바로 한다.
+  // 배급량을 넘길 수는 없다 — 나중에 디렉터가 미리 깔아 둔 고정 구조물을
+  // 지워 잉크를 벌어들이는 일을 막는다.
+  board.ink = Math.min(INK_MAX, board.ink + INK_REFUND);
 
   for (const p of board.plates) {
     const i = p.cells.findIndex((c) => c.x === x && c.y === y);
