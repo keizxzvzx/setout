@@ -1,1 +1,27 @@
-setout
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SETOUT</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #0E2440;
+  }
+  canvas {
+    display: block;
+    /* 그리기 도구다. 드래그가 텍스트 선택이나 스크롤로 새면 안 된다. */
+    touch-action: none;
+    cursor: crosshair;
+  }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
