@@ -9,8 +9,13 @@ export const TILE_H = 32;
 export const BLOCK_H = TILE_H;
 
 // 바닥 격자 크기 (칸)
-export const GRID_W = 24;
-export const GRID_H = 24;
+//
+// 24×24 는 576칸이라 배급량 60칸이 10% 밖에 되지 않아 화면이 광활한 빈 바닥에
+// 잉크 몇 방울처럼 보였다. 잉크를 늘리면 제약 자체가 사라지므로 분모를 줄였다.
+// 스테이지가 생기면 판 크기도 AI 디렉터가 층마다 정한다. 카메라가 자동으로
+// 맞추므로 어떤 크기를 줘도 화면에는 문제가 없다.
+export const GRID_W = 16;
+export const GRID_H = 16;
 
 // 판 한 장의 시각적 두께 (px). 논리 높이가 아니라 순수 연출.
 export const PLATE_T = 7;
@@ -42,6 +47,8 @@ export const INK_COST = 2;
 export const INK_REFUND = 1;
 
 // 개발용 기본 배급량. 스테이지가 생기면 AI 디렉터가 매 층 정한다.
+// 60칸 = 16×16 바닥(256칸)의 약 23%. 판 크기에 연동시키지 않고 절대값으로
+// 두는 이유는, 배급량이 판 크기가 아니라 목표까지의 거리에 달려 있기 때문이다.
 export const INK_MAX = 120;   // = 60칸
 
 // 뷰 여백 (px), 그리고 판 위로 확보해 둘 높이 여유 (칸).
