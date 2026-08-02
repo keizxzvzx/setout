@@ -97,6 +97,72 @@ export function commitStroke() {
   return made;
 }
 
+// --- 지우기 ---------------------------------------------------------------
+//
+// 그리기와 달리 즉시 반영한다. 획은 전체가 모여야 판 하나가 되지만
+// 지우기는 칸 하나하나가 독립적이라 확정을 미룰 이유가 없고,
+// 지우개는 문지르는 즉시 지워져야 지우개답다.
+//
+// 다만 덩어리 재분해는 손을 뗄 때 한 번만 한다. 지우기는 칸을 빼기만
+// 하므로 한 번 갈라진 판이 도로 붙는 일이 없다.
+
+export function beginErase(cell) {
+  lastCell = null;
+  extendErase(cell);
+}
+
+export function extendErase(cell) {
+  if (!cell) {
+    lastCell = null;
+    return;
+  }
+
+  if (lastCell) {
+    for (const c of lineCells(lastCell, cell)) erase(c.x, c.y);
+  } else {
+    erase(cell.x, cell.y);
+  }
+
+  lastCell = cell;
+}
+
+function erase(x, y) {
+  const k = key(x, y);
+  if (!board.occupied.has(k)) return;
+  board.occupied.delete(k);
+
+  for (const p of board.plates) {
+    const i = p.cells.findIndex((c) => c.x === x && c.y === y);
+    if (i >= 0) {
+      p.cells.splice(i, 1);
+      return;
+    }
+  }
+}
+
+// 손을 뗀 순간. 텅 빈 판을 걷어내고, 갈라진 판을 다시 덩어리로 쪼갠다.
+//
+// ㄷ자 판의 가운데를 지우면 남은 것은 판 둘이다. 여기서 쪼개 두지 않으면
+// 서로 떨어진 두 조각이 한 판으로 남아, 한쪽을 집어 올릴 때 다른 쪽이
+// 같이 떠오른다. 획을 확정할 때 쓰는 연결 성분 분해를 그대로 재사용한다.
+export function commitErase() {
+  const next = [];
+
+  for (const p of board.plates) {
+    if (!p.cells.length) continue;
+
+    const groups = components(new Set(p.cells.map((c) => key(c.x, c.y))));
+    if (groups.length === 1) {
+      next.push(p);
+      continue;
+    }
+    for (const g of groups) next.push({ ...p, cells: g });
+  }
+
+  board.plates = next;
+  lastCell = null;
+}
+
 // 연결 성분 분해. 칠해진 칸 집합을 서로 붙은 덩어리들로 가른다.
 function components(cellKeys) {
   const left = new Set(cellKeys);

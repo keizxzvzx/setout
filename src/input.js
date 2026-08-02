@@ -4,10 +4,16 @@
 // 나머지는 좌표계를 어디서 재느냐와, 언제 획이 시작되고 끝나느냐의 문제.
 
 import { screenToGrid } from './iso.js';
-import { inBounds, beginStroke, extendStroke, commitStroke, cancelStroke } from './board.js';
+import {
+  inBounds,
+  beginStroke, extendStroke, commitStroke, cancelStroke,
+  beginErase, extendErase, commitErase,
+} from './board.js';
 
-// 커서가 가리키는 칸. 판 밖이거나 창을 벗어나면 null.
-export const pointer = { cell: null, drawing: false };
+// cell  : 커서가 가리키는 칸. 판 밖이거나 창을 벗어나면 null
+// mode  : null | 'draw' | 'erase'
+// button: 그 동작을 시작한 마우스 버튼
+export const pointer = { cell: null, mode: null, button: -1 };
 
 export function attachPointer(canvas) {
   // 캔버스가 창을 꽉 채우더라도 좌표는 캔버스 기준으로 잰다.
@@ -18,8 +24,21 @@ export function attachPointer(canvas) {
     return inBounds(g.x, g.y) ? g : null;
   }
 
+  function finish() {
+    if (pointer.mode === 'draw') commitStroke();
+    else if (pointer.mode === 'erase') commitErase();
+    pointer.mode = null;
+    pointer.button = -1;
+  }
+
+  // 우클릭이 지우개이므로 브라우저 기본 메뉴를 막는다.
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
   canvas.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
+    // 이미 한 버튼으로 작업 중이면 다른 버튼은 무시한다.
+    // 좌클릭으로 긋다가 우클릭이 끼어들면 두 동작이 섞인다.
+    if (pointer.mode) return;
+    if (e.button !== 0 && e.button !== 2) return;
 
     // 포인터를 캔버스에 붙잡아 둔다. 이렇게 해야 드래그가 창 밖으로
     // 나가도 이벤트가 계속 들어와, 밖에서 손을 떼도 획이 유령처럼
@@ -27,36 +46,51 @@ export function attachPointer(canvas) {
     canvas.setPointerCapture(e.pointerId);
 
     pointer.cell = toCell(e);
-    pointer.drawing = true;
-    beginStroke(pointer.cell);
+    pointer.button = e.button;
+
+    if (e.button === 0) {
+      pointer.mode = 'draw';
+      beginStroke(pointer.cell);
+    } else {
+      pointer.mode = 'erase';
+      beginErase(pointer.cell);
+    }
   });
 
   canvas.addEventListener('pointermove', (e) => {
     pointer.cell = toCell(e);
-    if (pointer.drawing) extendStroke(pointer.cell);
+    if (pointer.mode === 'draw') extendStroke(pointer.cell);
+    else if (pointer.mode === 'erase') extendErase(pointer.cell);
   });
 
-  canvas.addEventListener('pointerup', () => {
-    if (!pointer.drawing) return;
-    pointer.drawing = false;
-    commitStroke();
+  canvas.addEventListener('pointerup', (e) => {
+    // 시작한 버튼이 떼어졌을 때만 끝낸다.
+    if (!pointer.mode || e.button !== pointer.button) return;
+    finish();
   });
 
-  // 시스템이 제스처를 가로챈 경우. 확정하지 않고 버린다.
+  // 시스템이 제스처를 가로챈 경우. 긋던 획은 확정하지 않고 버린다.
   canvas.addEventListener('pointercancel', () => {
-    pointer.drawing = false;
-    cancelStroke();
+    if (pointer.mode === 'draw') cancelStroke();
+    else if (pointer.mode === 'erase') commitErase();
+    pointer.mode = null;
+    pointer.button = -1;
   });
 
   canvas.addEventListener('pointerleave', () => {
-    if (!pointer.drawing) pointer.cell = null;
+    if (!pointer.mode) pointer.cell = null;
   });
 
   // 긋는 도중 무르기. 확정된 판은 건드리지 않는다.
+  // 지우기는 이미 반영된 뒤라 무를 것이 없고, 갈라진 판만 정리하고 끝낸다.
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && pointer.drawing) {
-      pointer.drawing = false;
+    if (e.key !== 'Escape' || !pointer.mode) return;
+    if (pointer.mode === 'draw') {
       cancelStroke();
+      pointer.mode = null;
+      pointer.button = -1;
+    } else {
+      finish();
     }
   });
 }

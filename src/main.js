@@ -67,7 +67,7 @@ function frame() {
   drawPlates(ctx);
   drawStroke(ctx);
   // 긋는 중에는 획 자체가 커서를 대신하므로 하이라이트를 겹쳐 띄우지 않는다.
-  if (!pointer.drawing) drawHoverCell(ctx, pointer.cell);
+  if (pointer.mode !== 'draw') drawHoverCell(ctx, pointer.cell);
   requestAnimationFrame(frame);
 }
 
