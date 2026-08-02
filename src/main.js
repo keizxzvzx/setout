@@ -5,7 +5,7 @@ import {
   VIEW_MARGIN, VIEW_HEADROOM,
 } from './config.js';
 import { setView } from './iso.js';
-import { clear, drawFloor, drawHoverCell } from './render.js';
+import { clear, drawFloor, drawPlates, drawStroke, drawHoverCell } from './render.js';
 import { pointer, attachPointer } from './input.js';
 
 const canvas = document.getElementById('stage');
@@ -64,7 +64,10 @@ function resize() {
 function frame() {
   clear(ctx, viewW, viewH);
   drawFloor(ctx);
-  drawHoverCell(ctx, pointer.cell);
+  drawPlates(ctx);
+  drawStroke(ctx);
+  // 긋는 중에는 획 자체가 커서를 대신하므로 하이라이트를 겹쳐 띄우지 않는다.
+  if (!pointer.drawing) drawHoverCell(ctx, pointer.cell);
   requestAnimationFrame(frame);
 }
 
