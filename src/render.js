@@ -62,31 +62,32 @@ function polygon(ctx, pts) {
 
 // 칸 하나를 두께 있는 철판으로 그린다.
 //
+// 두께는 바닥 평면에서 위로 세운다. 아래로 뻗으면 등각 화면에서 아래쪽이
+// 카메라에 가까운 방향이므로 앞칸의 바닥을 덮어 격자선을 넘어간다.
+// 바닥에 놓인 철판은 바닥 위에 얹혀야지 파묻히면 안 된다.
+//
+// 그래서 격자와 정확히 맞는 것은 판의 아랫면이고, 윗면(걷는 면)은
+// 두께만큼 올라가 있다. 모든 판이 똑같이 올라가므로 판끼리의 상대 정렬은
+// 그대로이고 착시에는 영향이 없다.
+//
 // 마름모 꼭짓점은 위 → 오른쪽 → 아래 → 왼쪽 순.
-// 화면에서 보이는 옆면은 아래쪽 두 변뿐이므로 두 장만 그린다.
+// 화면에서 보이는 옆면은 아래쪽 두 변뿐이라 두 장만 그린다.
 // 뒤쪽 면은 어차피 자기 윗면에 가려진다.
 function drawPlateCell(ctx, x, y, z) {
-  const [top, right, bottom, left] = tileDiamond(x, y, z);
   const t = PLATE_T * view.scale;
+  const base = tileDiamond(x, y, z);
+  const top = base.map((p) => ({ x: p.x, y: p.y - t }));
 
   ctx.fillStyle = COLOR.plateRight;
-  polygon(ctx, [
-    right, bottom,
-    { x: bottom.x, y: bottom.y + t },
-    { x: right.x, y: right.y + t },
-  ]);
+  polygon(ctx, [top[1], top[2], base[2], base[1]]);
   ctx.fill();
 
   ctx.fillStyle = COLOR.plateLeft;
-  polygon(ctx, [
-    bottom, left,
-    { x: left.x, y: left.y + t },
-    { x: bottom.x, y: bottom.y + t },
-  ]);
+  polygon(ctx, [top[2], top[3], base[3], base[2]]);
   ctx.fill();
 
   ctx.fillStyle = COLOR.plateTop;
-  polygon(ctx, [top, right, bottom, left]);
+  polygon(ctx, top);
   ctx.fill();
 }
 
