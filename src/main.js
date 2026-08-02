@@ -5,7 +5,8 @@ import {
   VIEW_MARGIN, VIEW_HEADROOM,
 } from './config.js';
 import { setView } from './iso.js';
-import { clear, drawFloor } from './render.js';
+import { clear, drawFloor, drawHoverCell } from './render.js';
+import { pointer, attachPointer } from './input.js';
 
 const canvas = document.getElementById('stage');
 const ctx = canvas.getContext('2d');
@@ -63,9 +64,11 @@ function resize() {
 function frame() {
   clear(ctx, viewW, viewH);
   drawFloor(ctx);
+  drawHoverCell(ctx, pointer.cell);
   requestAnimationFrame(frame);
 }
 
 window.addEventListener('resize', resize);
+attachPointer(canvas);
 resize();
 requestAnimationFrame(frame);

@@ -4,7 +4,7 @@
 // 그래서 바닥은 끝까지 선으로만 남고, 채워지는 것은 판뿐이다.
 
 import { GRID_W, GRID_H, COLOR } from './config.js';
-import { worldToScreen } from './iso.js';
+import { worldToScreen, tileDiamond } from './iso.js';
 
 export function clear(ctx, w, h) {
   ctx.fillStyle = COLOR.bg;
@@ -49,5 +49,33 @@ export function drawFloor(ctx) {
   ctx.closePath();
   ctx.stroke();
 
+  ctx.restore();
+}
+
+// 커서가 가리키는 칸. 스타일러스 끝이 닿은 자리라는 뜻으로 앰버.
+//
+// 이 하이라이트는 연출이기 이전에 좌표계 검증 도구다.
+// 커서가 마름모 경계를 넘는 순간 하이라이트도 같이 넘어가지 않으면
+// 투영과 역투영이 어긋난 것이고, 그 상태로 그리기를 얹으면
+// 그은 곳과 칠해지는 곳이 다른 게임이 된다.
+export function drawHoverCell(ctx, cell) {
+  if (!cell) return;
+
+  const d = tileDiamond(cell.x, cell.y);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(d[0].x, d[0].y);
+  for (let i = 1; i < d.length; i++) ctx.lineTo(d[i].x, d[i].y);
+  ctx.closePath();
+
+  ctx.fillStyle = COLOR.amber;
+  ctx.globalAlpha = 0.16;
+  ctx.fill();
+
+  ctx.globalAlpha = 0.85;
+  ctx.strokeStyle = COLOR.amber;
+  ctx.lineWidth = 1;
+  ctx.stroke();
   ctx.restore();
 }
