@@ -24,6 +24,7 @@ const SUITES = [
   ['wheel',  '휠 입력 — 장치별 delta 흡수'],
   ['move',   '이동 그래프 — 화면상 인접, BFS, 솔버 재사용 조건'],
   ['stepping', '징검다리 — 2단계 구멍이 막혔는가'],
+  ['occlusion', '가림 — 보이지 않는 것은 건널 수 없다'],
 ];
 
 let failed = 0;

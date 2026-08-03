@@ -17,6 +17,24 @@ const check = (name, cond, extra = '') => {
 const cell = (x, y, z = 0) => ({ x, y, z });
 const shape = (path) => (path ?? []).map((c) => `(${c.x},${c.y},${c.z})`).join(' → ');
 
+// 검사 배치가 의도치 않게 겹치지 않았는가.
+//
+// 같은 화면 자리에 칸이 둘 있으면 위의 것만 보이고 아래는 길에서 빠진다.
+// 그것을 시험하려는 배치가 아니라면 겹침은 시나리오의 실수다.
+const overlaps = (cells) => {
+  const seen = new Map();
+  const dup = [];
+  for (const c of cells) {
+    const s = P.screenCell(c);
+    const k = `${s.x},${s.y}`;
+    if (seen.has(k)) dup.push(`${shape([seen.get(k)])} 와 ${shape([c])} 가 화면 (${k})`);
+    else seen.set(k, c);
+  }
+  return dup;
+};
+const noOverlap = (cells) => overlaps(cells).length === 0;
+const overlapNote = (cells) => overlaps(cells).join(', ');
+
 // --- 1. 인접 판정 -----------------------------------------------------------
 
 {
@@ -115,10 +133,17 @@ const shape = (path) => (path ?? []).map((c) => `(${c.x},${c.y},${c.z})`).join('
   check('그 경로는 착시를 씀', P.usesIllusion(p3));
 
   // 최단이 착시를 요구하는가 — 6단계 솔버의 검증 조건 그대로
+  //
+  // 처음 쓴 배치는 정직한 다리의 (1,0,z=0) 과 곁가지 (4,3,z=3) 이 둘 다 화면
+  // 자리 (1,0) 에 왔다. 5단계에서 가림을 반영하자 z 가 큰 쪽이 이겨 정직한
+  // 칸이 가려졌고, 이 검사가 뒤집혔다. 코드가 아니라 시나리오가 틀린 경우다.
+  // 그래서 겹침이 없다는 것을 먼저 확인한 뒤에 묻는다.
   const both = [
     cell(0, 0, 0), cell(1, 0, 0), cell(2, 0, 0), cell(3, 0, 0),   // 정직한 다리
-    cell(4, 3, 3),                                                 // 착시 지름길
+    cell(4, 4, 3),                                                 // 화면 (1,1) — 곁가지
   ];
+  check('배치에 겹치는 화면 자리가 없음', noOverlap(both), overlapNote(both));
+
   const p4 = P.findPath(both, cell(0, 0, 0), cell(3, 0, 0));
   check('정직한 길이 있으면 그쪽이 최단', p4 && p4.length === 4 && !P.usesIllusion(p4), shape(p4));
 }
