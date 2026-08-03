@@ -8,7 +8,7 @@
 
 import { MOVE_TIME } from './config.js';
 import { board, key, plateAt, cellList } from './board.js';
-import { findPath } from './path.js';
+import { findPath, isIllusion } from './path.js';
 import { worldToScreen } from './iso.js';
 
 // 캐릭터가 서 있는 칸. 높이는 그 자리의 판에서 끌어온다.
@@ -66,6 +66,14 @@ export function updateActor(dt) {
     // 도착. 지나온 칸을 전부 밟은 것으로 기록한다.
     const end = a.path[legs];
     for (const c of a.path) board.stepped.add(key(c.x, c.y));
+
+    // 건넌 간선을 성향 지표로 센다. 6단계 디렉터가 읽는다.
+    // 게임 안에는 아무 표시도 하지 않는다 — 플레이어는 자기가 착시를 썼는지
+    // 알 필요가 없고, 알려 주는 순간 그냥 이어져 보이기만 하는 것이 아니게 된다.
+    for (let i = 1; i < a.path.length; i++) {
+      if (isIllusion(a.path[i - 1], a.path[i])) board.stats.illusionSteps++;
+      else board.stats.realSteps++;
+    }
 
     a.x = end.x;
     a.y = end.y;

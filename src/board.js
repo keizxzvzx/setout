@@ -46,6 +46,21 @@ export const board = {
   stepped: new Set(),     // 캐릭터가 지나간 칸. 환급받지 못한다
   goal: null,             // { x, y } 빈 바닥 칸
   cleared: false,
+  erased: new Set(),      // 지운 적 있는 칸. 다시 그리면 지표로 센다
+
+  // 6단계 AI 디렉터가 읽을 플레이어 지표.
+  //
+  // 디렉터는 레벨을 만드는 것이 아니라 플레이어를 읽고 그 사람이 피하는 것을
+  // 만든다. 그러려면 성향이 숫자로 남아 있어야 한다.
+  //   늘 다리로 밀어붙이는 사람 → inkSpent 가 높고 illusionSteps 가 0에 가깝다
+  //   착시만 노리는 사람        → 그 반대
+  //   망설이는 사람             → redraws 가 높다
+  stats: {
+    inkSpent: 0,        // 지금까지 쓴 잉크 총량 (환급과 무관한 누적)
+    redraws: 0,         // 지웠다 다시 그린 칸 수
+    illusionSteps: 0,   // 착시 간선을 건넌 횟수
+    realSteps: 0,       // 진짜 길을 건넌 횟수
+  },
 };
 
 // 캐릭터가 서 있는 칸이 화면에 실제로 보이는가.
@@ -234,13 +249,19 @@ export function commitStroke() {
 
   // 잉크는 여기서 처음 깎인다. 긋는 동안에는 inkAvailable() 로만 빠져 있었다.
   board.ink -= board.stroke.size * INK_COST;
+  board.stats.inkSpent += board.stroke.size * INK_COST;
 
   for (const group of components(board.stroke)) {
     const plate = { cells: group, z: 0 };
     board.plates.push(plate);
     made.push(plate);
 
-    for (const c of group) board.occupied.add(key(c.x, c.y));
+    for (const c of group) {
+      const k = key(c.x, c.y);
+      board.occupied.add(k);
+      // 지웠던 자리에 다시 그렸다. 망설임의 지표라 디렉터가 읽는다.
+      if (board.erased.delete(k)) board.stats.redraws++;
+    }
   }
 
   board.stroke.clear();
@@ -291,6 +312,7 @@ function erase(gx, gy) {
   if (a && a.x === hit.x && a.y === hit.y) return;
 
   board.occupied.delete(key(hit.x, hit.y));
+  board.erased.add(key(hit.x, hit.y));
 
   // 절반만 돌아온다. 지우기는 즉시 반영이므로 환급도 여기서 바로 한다.
   // 배급량을 넘길 수는 없다 — 나중에 디렉터가 미리 깔아 둔 고정 구조물을
