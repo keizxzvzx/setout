@@ -7,7 +7,7 @@
 // 이 분리가 있어야 획 도중 취소가 판을 건드리지 않고,
 // 나중에 잉크 게이지도 "쓴 잉크 + 긋는 중인 획"으로 미리보기가 나온다.
 
-import { GRID_W, GRID_H, INK_COST, INK_REFUND, INK_MAX } from './config.js';
+import { GRID_W, GRID_H, INK_COST, INK_REFUND, INK_MAX, Z_MIN, Z_MAX } from './config.js';
 
 export const key = (x, y) => x + ',' + y;
 
@@ -20,12 +20,63 @@ export function inBounds(x, y) {
   return x >= 0 && y >= 0 && x < GRID_W && y < GRID_H;
 }
 
+// occupied 는 "그 (x,y) 기둥이 어느 판에 잡혀 있다"는 뜻이다.
+// 판을 위로 올려도 그 자리는 계속 잡혀 있다 — 뜬 판 아래로 다른 판을
+// 통과시키는 2층 구조는 만들 수 없다.
+//
+// 비워 주는 쪽이 표현력은 넓지만, 한 (x,y) 에 여러 판이 겹칠 수 있게 되어
+// (x,y) → 판 조회가 1:1 이 아니게 된다. 지우기·잉크 회계·연결 성분 분해가
+// 전부 그 조회 위에 서 있으므로 셋 다 다시 짜야 한다.
+// 착시는 화면상 정렬로 성립하지 층 쌓기로 성립하지 않으므로 얻는 것도 없다.
 export const board = {
   plates: [],
   stroke: new Set(),      // 긋는 중인 칸들
-  occupied: new Set(),    // 바닥(z=0)이 이미 판에 덮인 칸들
+  occupied: new Set(),    // 판에 잡힌 (x,y) 기둥들
   ink: INK_MAX,           // 확정된 잉크. 긋는 중인 획은 아직 여기서 빠지지 않는다
 };
+
+// 그 칸을 품고 있는 판. 없으면 null.
+// 잉크 상한이 60칸이라 판 전체를 훑어도 60칸을 넘지 않는다.
+function plateAt(x, y) {
+  for (const p of board.plates) {
+    for (const c of p.cells) {
+      if (c.x === x && c.y === y) return p;
+    }
+  }
+  return null;
+}
+
+// 바닥칸 (gx, gy) 자리에 실제로 보이는 판 칸을 고른다.
+//
+// (x, y, z) 는 바닥의 (x−z, y−z) 자리에 나타나므로, 이 자리에 올 수 있는
+// 판 칸은 (gx+z, gy+z, z) 뿐이다. z 에 상한이 있으니 후보를 전부 세어 볼 수 있다.
+//
+// 위에서부터 훑어 처음 걸리는 것이 답이다. 후보들의 정렬 키를 펴 보면
+//   depthKey = x + y + z = (gx+z) + (gy+z) + z = gx + gy + 3z
+// 로 z 에 대해 단조증가하므로, z 가 큰 후보가 언제나 위에 그려진다.
+// 렌더가 쓰는 정렬과 같은 식이라 둘이 어긋날 수 없다.
+//
+// 휠·지우기·하이라이트가 전부 이 함수를 쓰고, 5단계의
+// "겹친 후보 중 실제로 보이는 것" 도 같은 함수다.
+export function pickAt(gx, gy) {
+  for (let z = Z_MAX; z >= Z_MIN; z--) {
+    const x = gx + z;
+    const y = gy + z;
+    if (!inBounds(x, y)) continue;
+
+    const p = plateAt(x, y);
+    if (p && p.z === z) return { plate: p, x, y, z };
+  }
+  return null;
+}
+
+// 판 한 장을 통째로 올리고 내린다. 잉크를 쓰지 않는다.
+export function movePlate(plate, dz) {
+  const next = Math.min(Z_MAX, Math.max(Z_MIN, plate.z + dz));
+  if (next === plate.z) return false;
+  plate.z = next;
+  return true;
+}
 
 // 지금 실제로 쓸 수 있는 잉크.
 //
@@ -81,7 +132,20 @@ function paint(x, y) {
   if (!inBounds(x, y)) return;
 
   const k = key(x, y);
-  if (board.occupied.has(k)) return;   // 이미 판이 깔린 자리
+
+  // 두 가지 이유로 그릴 수 없다. 둘은 판이 뜨는 순간 서로 다른 칸을 가리킨다.
+  //
+  // 하나, 그 기둥을 이미 판이 잡고 있다. 판을 올려도 기둥은 놓지 않으므로
+  // (x, y, z) 인 판은 z 와 무관하게 (x, y) 를 계속 막는다. 이 검사가 있어야
+  // 한 기둥에 판이 둘 생기는 일이 없고, (x,y) → 판 조회가 유일하게 유지된다.
+  // 이것을 pickAt 으로 대신하면 판을 올린 순간 원래 기둥이 풀려, 같은 자리에
+  // 두 번째 판을 그릴 수 있게 되고 지우기가 어느 쪽을 가리키는지 알 수 없어진다.
+  //
+  // 둘, 눈에 보이는 판이 그 자리를 덮고 있다. 뜬 판은 (x−z, y−z) 자리를
+  // 가리므로 그 밑에 그으면 잉크만 먹고 아무것도 보이지 않는다.
+  // 보이는 바닥에만 그린다 — 튜토리얼 없이 이해되는 유일한 규칙이다.
+  if (board.occupied.has(k)) return;
+  if (pickAt(x, y)) return;
   if (board.stroke.has(k)) return;     // 이번 획에 이미 포함된 칸은 공짜
 
   // 잉크가 다하면 그 지점에서 획이 멈춘다. 획 전체를 거부하면 왜 안 되는지
@@ -148,23 +212,23 @@ export function extendErase(cell) {
   lastCell = cell;
 }
 
-function erase(x, y) {
-  const k = key(x, y);
-  if (!board.occupied.has(k)) return;
-  board.occupied.delete(k);
+// 인자는 커서가 훑은 바닥칸이지 지울 칸이 아니다.
+// 판이 뜨면 둘이 (x−z, y−z) 만큼 어긋나므로 pickAt 으로 옮겨 잡는다.
+// 보간도 바닥칸 위에서 한다. 뜬 판과 눕힌 판을 오갈 때 잡히는 칸은 격자상
+// 멀리 뛰지만 커서가 실제로 지나간 화면 경로는 이어져 있기 때문이다.
+function erase(gx, gy) {
+  const hit = pickAt(gx, gy);
+  if (!hit) return;
+
+  board.occupied.delete(key(hit.x, hit.y));
 
   // 절반만 돌아온다. 지우기는 즉시 반영이므로 환급도 여기서 바로 한다.
   // 배급량을 넘길 수는 없다 — 나중에 디렉터가 미리 깔아 둔 고정 구조물을
   // 지워 잉크를 벌어들이는 일을 막는다.
   board.ink = Math.min(INK_MAX, board.ink + INK_REFUND);
 
-  for (const p of board.plates) {
-    const i = p.cells.findIndex((c) => c.x === x && c.y === y);
-    if (i >= 0) {
-      p.cells.splice(i, 1);
-      return;
-    }
-  }
+  const i = hit.plate.cells.findIndex((c) => c.x === hit.x && c.y === hit.y);
+  if (i >= 0) hit.plate.cells.splice(i, 1);
 }
 
 // 손을 뗀 순간. 텅 빈 판을 걷어내고, 갈라진 판을 다시 덩어리로 쪼갠다.
