@@ -28,16 +28,27 @@ export function inBounds(x, y) {
 // (x,y) → 판 조회가 1:1 이 아니게 된다. 지우기·잉크 회계·연결 성분 분해가
 // 전부 그 조회 위에 서 있으므로 셋 다 다시 짜야 한다.
 // 착시는 화면상 정렬로 성립하지 층 쌓기로 성립하지 않으므로 얻는 것도 없다.
+//
+// actor 는 격자 칸만 들고 z 는 갖지 않는다. 서 있는 칸의 판에서 끌어오면
+// 캐릭터를 태운 채 판을 올려도 둘이 어긋나지 않는다. 따로 저장하면 휠로
+// 판을 올리는 순간 캐릭터만 공중에 남는다. 판을 태워 올리는 것은 먼 판과
+// 높이를 맞추는 조작이므로 막을 이유도 없다.
+//
+// stepped 는 캐릭터가 지나간 칸이다. 환급을 갈라야 해서 따로 센다.
 export const board = {
   plates: [],
   stroke: new Set(),      // 긋는 중인 칸들
   occupied: new Set(),    // 판에 잡힌 (x,y) 기둥들
   ink: INK_MAX,           // 확정된 잉크. 긋는 중인 획은 아직 여기서 빠지지 않는다
+  actor: null,            // { x, y, path, leg, t } — 높이는 밟고 선 판에서 온다
+  stepped: new Set(),     // 캐릭터가 지나간 칸. 환급받지 못한다
+  goal: null,             // { x, y } 빈 바닥 칸
+  cleared: false,
 };
 
 // 그 칸을 품고 있는 판. 없으면 null.
 // 잉크 상한이 60칸이라 판 전체를 훑어도 60칸을 넘지 않는다.
-function plateAt(x, y) {
+export function plateAt(x, y) {
   for (const p of board.plates) {
     for (const c of p.cells) {
       if (c.x === x && c.y === y) return p;
@@ -68,6 +79,29 @@ export function pickAt(gx, gy) {
     if (p && p.z === z) return { plate: p, x, y, z };
   }
   return null;
+}
+
+// 미리 깔아 두는 판. 잉크를 쓰지 않는다.
+//
+// 시작 발판과, 나중에 디렉터가 놓을 고정 구조물이 이것으로 들어온다.
+// 획을 그어 만든 판과 자료 구조가 같으므로 지우기·높이 조절이 그대로 먹는다.
+export function addPlate(cells, z = 0) {
+  const plate = { cells: cells.map((c) => ({ x: c.x, y: c.y })), z };
+  board.plates.push(plate);
+  for (const c of plate.cells) board.occupied.add(key(c.x, c.y));
+  return plate;
+}
+
+// 지금 놓인 판 칸 전부를 { x, y, z } 목록으로 펴낸다.
+//
+// 이동 그래프와 길찾기는 이 스냅샷만 받는다. 그래야 같은 함수로 6단계
+// 디렉터가 아직 놓지도 않은 가상의 배치를 물어볼 수 있다.
+export function cellList() {
+  const out = [];
+  for (const p of board.plates) {
+    for (const c of p.cells) out.push({ x: c.x, y: c.y, z: p.z });
+  }
+  return out;
 }
 
 // 판 한 장을 통째로 올리고 내린다. 잉크를 쓰지 않는다.
@@ -219,6 +253,11 @@ export function extendErase(cell) {
 function erase(gx, gy) {
   const hit = pickAt(gx, gy);
   if (!hit) return;
+
+  // 밟고 선 칸은 지울 수 없다. 발밑을 빼면 캐릭터가 허공에 남고, 떨어지는
+  // 처리를 새로 만들어야 한다. 서 있는 자리를 못 지우는 것은 설명이 필요 없다.
+  const a = board.actor;
+  if (a && a.x === hit.x && a.y === hit.y) return;
 
   board.occupied.delete(key(hit.x, hit.y));
 

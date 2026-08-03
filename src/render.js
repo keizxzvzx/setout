@@ -3,9 +3,13 @@
 // 원칙: 아직 그리지 않은 것 = 선, 그린 것 = 면.
 // 그래서 바닥은 끝까지 선으로만 남고, 채워지는 것은 판뿐이다.
 
-import { GRID_W, GRID_H, PLATE_T, INK_MAX, VIEW_MARGIN, COLOR } from './config.js';
+import {
+  GRID_W, GRID_H, PLATE_T, INK_MAX, VIEW_MARGIN,
+  TILE_W, TILE_H, ACTOR_R, ACTOR_H, ACTOR_W, COLOR,
+} from './config.js';
 import { worldToScreen, tileDiamond, depthKey, view } from './iso.js';
-import { board, parseKey, inkAvailable } from './board.js';
+import { board, parseKey, inkAvailable, cellList } from './board.js';
+import { actorScreenPos, actorDepthCell } from './actor.js';
 
 export function clear(ctx, w, h) {
   ctx.fillStyle = COLOR.bg;
@@ -94,16 +98,116 @@ function drawPlateCell(ctx, x, y, z) {
 export function drawPlates(ctx) {
   // 깊이가 소멸하는 투영이라 서로 다른 칸이 같은 픽셀을 점유한다.
   // 무엇이 위에 보이는가는 이 정렬 하나로 정해진다.
-  // 나중에 착시 이동에서 "겹친 후보 중 실제로 보이는 것"을 고를 때도
-  // 같은 키를 쓴다.
-  const cells = [];
-  for (const p of board.plates) {
-    for (const c of p.cells) cells.push({ x: c.x, y: c.y, z: p.z });
-  }
+  // 착시 이동에서 "겹친 후보 중 실제로 보이는 것"을 고를 때도 같은 키를 쓴다.
+  const cells = cellList();
   cells.sort((a, b) => depthKey(a.x, a.y, a.z) - depthKey(b.x, b.y, b.z));
 
+  // 캐릭터는 서 있는 칸 바로 다음에 그린다. 따로 맨 뒤에 그리면 앞칸 판을
+  // 뚫고 보이고, 맨 앞에 그리면 자기가 선 판에 가려진다.
+  const actorAt = actorDepthCell();
+
   ctx.save();
-  for (const c of cells) drawPlateCell(ctx, c.x, c.y, c.z);
+  for (const c of cells) {
+    drawPlateCell(ctx, c.x, c.y, c.z);
+    if (actorAt && c.x === actorAt.x && c.y === actorAt.y) drawActor(ctx);
+  }
+  ctx.restore();
+}
+
+// 목표 표식. 빈 바닥에 찍힌 앰버 마름모.
+//
+// 판이 아니라 바닥에 있으므로 그 자리까지 판을 그려야 닿는다.
+// 그 위에 판을 깔면 표식이 가려지는데, 그것으로 맞다 — 도달한 자리다.
+export function drawGoal(ctx) {
+  if (!board.goal) return;
+
+  const pts = tileDiamond(board.goal.x, board.goal.y);
+
+  ctx.save();
+  ctx.strokeStyle = COLOR.amber;
+  ctx.fillStyle = COLOR.amber;
+
+  ctx.globalAlpha = board.cleared ? 0.55 : 0.18;
+  polygon(ctx, pts);
+  ctx.fill();
+
+  ctx.globalAlpha = board.cleared ? 1 : 0.8;
+  ctx.lineWidth = 1.5;
+  polygon(ctx, pts);
+  ctx.stroke();
+
+  // 안쪽으로 한 겹 더. 부지 외곽선과 같은 앰버라도 겹선이면 표식으로 읽힌다.
+  const c = worldToScreen(board.goal.x + 0.5, board.goal.y + 0.5);
+  const inner = pts.map((p) => ({
+    x: c.x + (p.x - c.x) * 0.45,
+    y: c.y + (p.y - c.y) * 0.45,
+  }));
+  polygon(ctx, inner);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// 캐릭터 — 흰 구체, 아래로 넓어지는 기둥, 바닥에 얇은 타원.
+//
+// 다리가 없으므로 걷기 프레임이 필요 없다. 이동은 전부 위치값 계산이라
+// 그림 작업이 0 이다.
+//
+// 발이 닿는 곳은 판의 윗면이지 격자면이 아니다. 두께를 위로 세워 두었으므로
+// PLATE_T 만큼 올려 세우지 않으면 캐릭터가 판에 파묻힌다.
+function drawActor(ctx) {
+  const pos = actorScreenPos();
+  if (!pos) return;
+
+  const s = view.scale;
+  const foot = { x: pos.x, y: pos.y - PLATE_T * s };
+
+  const head = { x: foot.x, y: foot.y - ACTOR_H * s };
+  const r = ACTOR_R * s;
+  const wBot = ACTOR_W * s;
+  const wTop = wBot * 0.55;
+
+  ctx.save();
+
+  // 그림자. 몸이 판 위에 얹혀 있다는 것을 이것 하나가 말해 준다.
+  ctx.fillStyle = '#000';
+  ctx.globalAlpha = 0.28;
+  ctx.beginPath();
+  ctx.ellipse(foot.x, foot.y, (TILE_W / 5) * s, (TILE_H / 5) * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = COLOR.actor;
+
+  // 몸 — 아래로 살짝 넓어지는 기둥
+  ctx.beginPath();
+  ctx.moveTo(foot.x - wBot, foot.y);
+  ctx.lineTo(foot.x + wBot, foot.y);
+  ctx.lineTo(head.x + wTop, head.y);
+  ctx.lineTo(head.x - wTop, head.y);
+  ctx.closePath();
+  ctx.fill();
+
+  // 머리
+  ctx.beginPath();
+  ctx.arc(head.x, head.y, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 스타일러스 — 오른쪽 위로, 끝에 앰버 점.
+  // 이 게임에서 선을 긋는 것이 무엇인지 알려주는 유일한 표시다.
+  const tip = { x: head.x + 11 * s, y: head.y - 9 * s };
+  ctx.strokeStyle = COLOR.actor;
+  ctx.lineWidth = Math.max(1, 1.6 * s);
+  ctx.beginPath();
+  ctx.moveTo(head.x + 3 * s, head.y + 5 * s);
+  ctx.lineTo(tip.x, tip.y);
+  ctx.stroke();
+
+  ctx.fillStyle = COLOR.amber;
+  ctx.beginPath();
+  ctx.arc(tip.x, tip.y, Math.max(1, 2 * s), 0, Math.PI * 2);
+  ctx.fill();
+
   ctx.restore();
 }
 
