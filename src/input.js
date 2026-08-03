@@ -9,6 +9,7 @@ import {
   beginStroke, extendStroke, commitStroke, cancelStroke,
   beginErase, extendErase, commitErase,
 } from './board.js';
+import { walkTo } from './actor.js';
 
 // cell  : 커서가 가리키는 바닥칸. 부지 밖이거나 창을 벗어나면 null
 // hit   : 커서 아래에 실제로 보이는 판 칸. 없으면 null
@@ -68,8 +69,20 @@ export function attachPointer(canvas) {
     pointer.button = e.button;
 
     if (e.button === 0) {
-      pointer.mode = 'draw';
-      beginStroke(pointer.cell);
+      // 무엇을 눌렀는가가 무엇을 하는가를 정한다.
+      // 판 위를 눌렀으면 걷기, 빈 바닥을 눌렀으면 그리기다. 수식 키가 없다.
+      //
+      // 목적지는 누른 칸이고 뗀 위치는 보지 않는다. 모드가 pointerdown 에서
+      // 확정되므로 뗄 때 다시 물을 것이 없고, 뜬 판은 올린 만큼 화면에서
+      // 물러나 있어 누른 채 커서를 움직이면 판이 커서 밑을 벗어난다.
+      // 뗀 지점을 목적지로 잡으면 높은 판일수록 조준이 어긋난다.
+      if (pointer.hit) {
+        pointer.mode = 'walk';
+        walkTo(pointer.hit.x, pointer.hit.y);
+      } else {
+        pointer.mode = 'draw';
+        beginStroke(pointer.cell);
+      }
     } else {
       pointer.mode = 'erase';
       beginErase(pc);
