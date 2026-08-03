@@ -7,7 +7,9 @@
 // 이 분리가 있어야 획 도중 취소가 판을 건드리지 않고,
 // 나중에 잉크 게이지도 "쓴 잉크 + 긋는 중인 획"으로 미리보기가 나온다.
 
-import { GRID_W, GRID_H, INK_COST, INK_REFUND, INK_MAX, Z_MIN, Z_MAX } from './config.js';
+import {
+  GRID_W, GRID_H, INK_COST, INK_REFUND, INK_REFUND_STEPPED, INK_MAX, Z_MIN, Z_MAX,
+} from './config.js';
 
 export const key = (x, y) => x + ',' + y;
 
@@ -264,7 +266,12 @@ function erase(gx, gy) {
   // 절반만 돌아온다. 지우기는 즉시 반영이므로 환급도 여기서 바로 한다.
   // 배급량을 넘길 수는 없다 — 나중에 디렉터가 미리 깔아 둔 고정 구조물을
   // 지워 잉크를 벌어들이는 일을 막는다.
-  board.ink = Math.min(INK_MAX, board.ink + INK_REFUND);
+  //
+  // 캐릭터가 지나간 칸은 한 방울도 돌려주지 않는다. 이것이 징검다리 이동을
+  // 막는 유일한 방법이다 — 환급이 조금이라도 남으면 앞에 그리고 뒤를 지우는
+  // 쪽이 언제나 싸다는 것이 2단계에서 계산으로 나왔다.
+  const refund = board.stepped.has(key(hit.x, hit.y)) ? INK_REFUND_STEPPED : INK_REFUND;
+  board.ink = Math.min(INK_MAX, board.ink + refund);
 
   const i = hit.plate.cells.findIndex((c) => c.x === hit.x && c.y === hit.y);
   if (i >= 0) hit.plate.cells.splice(i, 1);
