@@ -37,20 +37,42 @@ export function isIllusion(a, b) {
 const NEIGHBORS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const skey = (x, y) => x + ',' + y;
 
-// 화면 자리 → 그 자리에 있는 칸들. 이웃 조회를 O(1) 로 만든다.
+// 화면 자리 → 그 자리에서 실제로 보이는 칸. 이웃 조회를 O(1) 로 만든다.
 //
 // 한 화면 자리에 여러 칸이 올 수 있다. (2,2,z=0) 과 (5,5,z=3) 은 둘 다 바닥
-// (2,2) 자리에 나타나고, 화면에서는 위의 것만 보인다. 지금은 둘 다 길로
-// 친다 — 보이지 않는 칸을 걸러내는 것은 가림 처리이고 5단계의 일이다.
+// (2,2) 자리에 나타나고, 화면에서는 위의 것만 보인다.
+//
+// 그중 무엇이 보이는가는 정렬 키를 펴 보면 나온다. 같은 자리 (gx, gy) 위의
+// 후보는 (gx+z, gy+z, z) 뿐이므로
+//
+//   depthKey = x + y + z = gx + gy + 3z
+//
+// 로 z 에 대해 단조증가한다. **z 가 가장 큰 것이 언제나 위**다.
+// render 의 깊이 정렬, board 의 pickAt 과 같은 식이라 셋이 어긋날 수 없다.
+//
+// 여기서 하나만 남기는 것이 이 게임의 규칙 그 자체다.
+// "이어져 보인다면 이어진 것이다" 의 역이 성립해야 한다 — 보이지 않는 것은
+// 건널 수 없어야 한다. 전부 길로 치면 판에 파묻힌 칸 위로 캐릭터가 지나가고,
+// 튜토리얼 문구가 없는 게임에서 플레이어는 무슨 일이 일어났는지 알 수 없다.
+//
+// pickAt 을 부르지 않고 같은 규칙을 스냅샷 위에 다시 세운 이유는 순수성이다.
+// pickAt 은 살아 있는 board 를 읽으므로, 부르는 순간 6단계 디렉터가 가상의
+// 배치를 물어볼 수 없게 된다.
 function indexByScreen(cells) {
   const map = new Map();
   for (const c of cells) {
     const s = screenCell(c);
     const k = skey(s.x, s.y);
-    if (!map.has(k)) map.set(k, []);
-    map.get(k).push(c);
+    const seen = map.get(k);
+    if (!seen || c.z > seen.z) map.set(k, c);
   }
   return map;
+}
+
+// 스냅샷에서 화면에 실제로 보이는 칸만 남긴다.
+// 6단계 솔버가 "이 배치에서 플레이어가 볼 수 있는 것" 을 물을 때 쓴다.
+export function visibleCells(cells) {
+  return [...indexByScreen(cells).values()];
 }
 
 // 최단 경로. 없으면 null.
@@ -73,19 +95,21 @@ export function findPath(cells, from, to) {
       const s = screenCell(c);
 
       for (const [dx, dy] of NEIGHBORS) {
-        for (const n of byScreen.get(skey(s.x + dx, s.y + dy)) ?? []) {
-          const k = at(n);
-          if (prev.has(k)) continue;
-          prev.set(k, c);
+        // 그 자리에서 보이는 칸 하나뿐이다. 가려진 칸은 애초에 후보가 아니다.
+        const n = byScreen.get(skey(s.x + dx, s.y + dy));
+        if (!n) continue;
 
-          if (k === at(to)) {
-            // 도착했으므로 거슬러 올라가 경로를 복원한다
-            const path = [n];
-            for (let p = c; p; p = prev.get(at(p))) path.push(p);
-            return path.reverse();
-          }
-          next.push(n);
+        const k = at(n);
+        if (prev.has(k)) continue;
+        prev.set(k, c);
+
+        if (k === at(to)) {
+          // 도착했으므로 거슬러 올라가 경로를 복원한다
+          const path = [n];
+          for (let p = c; p; p = prev.get(at(p))) path.push(p);
+          return path.reverse();
         }
+        next.push(n);
       }
     }
 
