@@ -48,6 +48,23 @@ export const board = {
   cleared: false,
 };
 
+// 캐릭터가 서 있는 칸이 화면에 실제로 보이는가.
+//
+// 판을 올리다 보면 다른 판이 캐릭터를 정확히 덮을 수 있다. 대각선 위에 있는
+// 판을 그 거리만큼 올리면 화면 자리가 정확히 포개지기 때문이다.
+// 덮이면 캐릭터가 화면에서 사라지고, 자기 말이 어디 있는지 볼 수 없으면
+// 게임이 성립하지 않는다.
+export function actorVisible() {
+  const a = board.actor;
+  if (!a) return true;
+
+  const p = plateAt(a.x, a.y);
+  if (!p) return true;
+
+  const hit = pickAt(a.x - p.z, a.y - p.z);
+  return !!hit && hit.x === a.x && hit.y === a.y;
+}
+
 // 그 칸을 품고 있는 판. 없으면 null.
 // 잉크 상한이 60칸이라 판 전체를 훑어도 60칸을 넘지 않는다.
 export function plateAt(x, y) {
@@ -107,10 +124,21 @@ export function cellList() {
 }
 
 // 판 한 장을 통째로 올리고 내린다. 잉크를 쓰지 않는다.
+//
+// 캐릭터를 덮게 되는 이동은 되돌린다. 막지 않으면 판 하나를 올리는 것만으로
+// 캐릭터가 화면에서 사라지고, 그 상태를 알려 줄 문구가 이 게임에는 없다.
+// 자기 말이 안 보이면 무엇을 눌러야 할지도 알 수 없다.
 export function movePlate(plate, dz) {
   const next = Math.min(Z_MAX, Math.max(Z_MIN, plate.z + dz));
   if (next === plate.z) return false;
+
+  const before = plate.z;
   plate.z = next;
+
+  if (!actorVisible()) {
+    plate.z = before;
+    return false;
+  }
   return true;
 }
 
@@ -211,6 +239,7 @@ export function commitStroke() {
     const plate = { cells: group, z: 0 };
     board.plates.push(plate);
     made.push(plate);
+
     for (const c of group) board.occupied.add(key(c.x, c.y));
   }
 
