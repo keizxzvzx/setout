@@ -1,0 +1,112 @@
+import * as B from '../src/board.js';
+import * as C from '../src/config.js';
+
+const { INK_MAX, INK_COST, INK_REFUND, GRID_H } = C;
+const GRIDY_SAFE = GRID_H;
+const reset = () => { B.board.plates.length = 0; B.board.stroke.clear(); B.board.occupied.clear(); B.board.ink = INK_MAX; B.cancelStroke(); };
+const cell = (x, y) => ({ x, y });
+let fail = 0;
+const check = (name, cond, extra = '') => { if (!cond) fail++; console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); };
+
+console.log(`설정: 총량 ${INK_MAX} (${INK_MAX / INK_COST}칸), 소모 ${INK_COST}, 환급 ${INK_REFUND}\n`);
+
+// 1) 긋는 동안 board.ink 는 그대로, inkAvailable 만 줄어드는가
+reset();
+B.beginStroke(cell(0, 0));
+B.extendStroke(cell(4, 0));                       // 5칸
+check('긋는 중 확정 잉크는 그대로', B.board.ink === INK_MAX, `ink=${B.board.ink}`);
+check('긋는 중 가용 잉크만 줄어듦', B.inkAvailable() === INK_MAX - 5 * INK_COST,
+  `available=${B.inkAvailable()}`);
+B.commitStroke();
+check('확정 시 잉크가 깎임', B.board.ink === INK_MAX - 5 * INK_COST, `ink=${B.board.ink}`);
+
+// 2) Esc 취소는 잉크를 건드리지 않는가
+reset();
+B.beginStroke(cell(0, 0));
+B.extendStroke(cell(9, 0));                       // 10칸
+B.cancelStroke();
+check('취소는 잉크를 안 먹음', B.board.ink === INK_MAX && B.inkAvailable() === INK_MAX,
+  `ink=${B.board.ink}`);
+
+// 3) 잉크가 다하면 그 지점에서 획이 멈추는가
+reset();
+B.board.ink = 6;                                  // 3칸치
+B.beginStroke(cell(0, 0));
+B.extendStroke(cell(23, 0));                      // 24칸을 시도
+check('잉크만큼만 그어짐', B.board.stroke.size === 3, `그어진 칸=${B.board.stroke.size}`);
+B.commitStroke();
+check('잉크를 정확히 다 씀', B.board.ink === 0, `ink=${B.board.ink}`);
+
+// 4) 잉크 0에서는 한 칸도 안 그어지는가
+B.beginStroke(cell(0, 5));
+B.extendStroke(cell(3, 5));
+check('잉크 0이면 못 그림', B.board.stroke.size === 0, `그어진 칸=${B.board.stroke.size}`);
+B.commitStroke();
+
+// 5) 지우면 절반만 돌아오는가
+reset();
+B.beginStroke(cell(0, 0));
+B.extendStroke(cell(9, 0));                       // 10칸 = 20 소모
+B.commitStroke();
+const afterDraw = B.board.ink;
+B.beginErase(cell(0, 0));
+B.extendErase(cell(9, 0));                        // 10칸 전부 지움
+B.commitErase();
+check('절반 환급', B.board.ink === afterDraw + 10 * INK_REFUND,
+  `${afterDraw} → ${B.board.ink} (총량 ${INK_MAX})`);
+check('그렸다 지우면 순손실 발생', B.board.ink === INK_MAX - 10 * (INK_COST - INK_REFUND),
+  `순손실 ${INK_MAX - B.board.ink}`);
+
+// 6) 징검다리 이동이 얼마나 유리한가 — 10칸 다리를 앞으로 옮겨가며 전진
+//    환급이 0보다 크면 칸당 실질 비용이 (소모 - 환급) 으로 떨어지므로
+//    환급률로는 막을 수 없다. 실제 배수를 측정해 둔다.
+reset();
+let advanced = 0;
+for (let round = 0; round < 100; round++) {
+  const y = round % GRIDY_SAFE;
+  B.beginStroke(cell(0, y));
+  B.extendStroke(cell(9, y));
+  if (B.board.stroke.size < 10) { B.cancelStroke(); break; }
+  B.commitStroke();
+  advanced += 10;
+  B.beginErase(cell(0, y));
+  B.extendErase(cell(9, y));
+  B.commitErase();
+}
+const direct = INK_MAX / INK_COST;
+check('징검다리가 직접 그리기보다 유리함 (환급률로 못 막음)', advanced > direct,
+  `직접 ${direct}칸 vs 징검다리 ${advanced}칸 = ${(advanced / direct).toFixed(1)}배`);
+
+// 7) 환급이 배급량을 넘지 않는가 (미리 깔린 판을 지워 잉크를 벌 수 없는가)
+reset();
+B.beginStroke(cell(2, 2));
+B.extendStroke(cell(6, 2));
+B.commitStroke();
+B.board.ink = INK_MAX;                            // 디렉터가 공짜로 깔아준 상황을 가정
+B.beginErase(cell(2, 2));
+B.extendErase(cell(6, 2));
+B.commitErase();
+check('환급은 배급량을 못 넘음', B.board.ink === INK_MAX, `ink=${B.board.ink}`);
+
+// 8) 같은 칸을 여러 번 지나도 한 번만 계산되는가
+reset();
+B.beginStroke(cell(3, 3));
+B.extendStroke(cell(5, 3));
+B.extendStroke(cell(3, 3));                       // 되돌아옴
+B.extendStroke(cell(5, 3));                       // 다시 감
+check('같은 칸 왕복은 한 번만 계산', B.board.stroke.size === 3,
+  `칸=${B.board.stroke.size}, available=${B.inkAvailable()}`);
+
+// 9) 이미 판이 깔린 칸을 덧그어도 잉크가 안 드는가
+reset();
+B.beginStroke(cell(1, 1));
+B.extendStroke(cell(4, 1));
+B.commitStroke();
+const before = B.board.ink;
+B.beginStroke(cell(1, 1));
+B.extendStroke(cell(4, 1));                       // 같은 자리를 덧그음
+B.commitStroke();
+check('점유 칸 덧긋기는 공짜', B.board.ink === before, `${before} → ${B.board.ink}`);
+
+console.log(fail ? `\n${fail}건 실패` : '\n전부 통과');
+process.exit(fail ? 1 : 0);
