@@ -165,11 +165,23 @@ export function drawInkGauge(ctx, viewW, viewH) {
 // 커서가 마름모 경계를 넘는 순간 하이라이트도 같이 넘어가지 않으면
 // 투영과 역투영이 어긋난 것이고, 그 상태로 그리기를 얹으면
 // 그은 곳과 칠해지는 곳이 다른 게임이 된다.
-export function drawHoverCell(ctx, cell) {
+//
+// 판이 뜬 뒤로는 검증 대상이 하나 늘었다. 커서 아래 판이 있으면 그 판의
+// 윗면을 빛내고, 없으면 바닥칸을 빛낸다. 하이라이트가 뜬 판을 정확히 덮지
+// 못하면 pickAt 이 렌더와 어긋난 것이고, 그 어긋남은 5단계에서
+// "이어져 보이는데 못 건너간다"로 나타난다.
+export function drawHoverCell(ctx, pointer) {
+  const hit = pointer.hit;
+  const cell = hit || pointer.cell;
   if (!cell) return;
 
+  // 판 위면 두께만큼 올려 윗면에 얹는다. 바닥이면 격자에 그대로 눕는다.
+  const t = hit ? PLATE_T * view.scale : 0;
+  const pts = tileDiamond(cell.x, cell.y, hit ? hit.z : 0)
+    .map((p) => ({ x: p.x, y: p.y - t }));
+
   ctx.save();
-  polygon(ctx, tileDiamond(cell.x, cell.y));
+  polygon(ctx, pts);
 
   ctx.fillStyle = COLOR.amber;
   ctx.globalAlpha = 0.16;
