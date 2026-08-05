@@ -1,7 +1,12 @@
 import * as B from '../src/board.js';
 import * as C from '../src/config.js';
+import { stage } from '../src/stage.js';
 
-const { INK_MAX, INK_COST, INK_REFUND, GRID_H } = C;
+// 배급량과 환급률은 층이 쥔다. 게임이 읽는 값과 검사가 읽는 값이 갈리면
+// 층을 조인 뒤에도 검사만 옛 값으로 돌아 통과해 버린다.
+const { INK_COST } = C;
+const { inkMax: INK_MAX, refund: INK_REFUND } = stage;
+const { GRID_H } = C;
 const GRIDY_SAFE = GRID_H;
 const reset = () => { B.board.plates.length = 0; B.board.stroke.clear(); B.board.occupied.clear(); B.board.ink = INK_MAX; B.cancelStroke(); };
 const cell = (x, y) => ({ x, y });

@@ -5,8 +5,9 @@
 
 import {
   TILE_W, TILE_H, BLOCK_H, PLATE_T,
-  GRID_W, GRID_H, VIEW_MARGIN, VIEW_HEADROOM,
+  GRID_W, GRID_H, VIEW_MARGIN,
 } from './config.js';
+import { headroom } from './stage.js';
 
 // 뷰 상태. 원점은 격자 (0,0) 타일의 위쪽 꼭짓점이 놓일 픽셀,
 // scale 은 판 전체가 창에 들어오도록 잡는 균등 배율이다.
@@ -33,7 +34,7 @@ export function setView(ox, oy, scale) {
 // 원점 기준 배율 1 일 때의 경계 상자:
 //   왼쪽   worldToScreen(0, GRID_H) → -GRID_H * TILE_W/2
 //   오른쪽 worldToScreen(GRID_W, 0) → +GRID_W * TILE_W/2
-//   위쪽   판을 올릴 여유(VIEW_HEADROOM)만큼 더 확보
+//   위쪽   판을 올릴 여유(stage.headroom())만큼 더 확보
 //   아래쪽 worldToScreen(GRID_W, GRID_H)
 //
 // 이 상자를 여백 안에 넣는 배율을 구하고, 상자 중심을 화면 중심에 맞춘다.
@@ -46,7 +47,10 @@ export function setView(ox, oy, scale) {
 export function fitView(viewW, viewH) {
   const left   = -GRID_H * (TILE_W / 2);
   const right  =  GRID_W * (TILE_W / 2);
-  const top    = -VIEW_HEADROOM * BLOCK_H;
+  // 여유는 층의 높이 상한에서 파생된다. 층이 바뀌어 zMax 가 달라지면
+  // fitView 를 다시 불러야 한다 — 안 부르면 이전 층의 여유로 그려 판 머리가
+  // 잘리고, 잘린 것은 화면 밖이라 잘렸다는 것조차 보이지 않는다.
+  const top    = -headroom() * BLOCK_H;
   const bottom = (GRID_W + GRID_H) * (TILE_H / 2);
 
   const boxW = right - left;

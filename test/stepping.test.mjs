@@ -16,7 +16,12 @@ import * as B from '../src/board.js';
 import * as A from '../src/actor.js';
 import * as C from '../src/config.js';
 
-const { INK_MAX, INK_COST, INK_REFUND, INK_REFUND_STEPPED, GRID_W, GRID_H } = C;
+import { stage } from '../src/stage.js';
+
+const { INK_COST, INK_REFUND_STEPPED, GRID_W, GRID_H } = C;
+// 배급량과 환급률은 층이 쥔다. 밟은 칸 환급 0 만 상수로 남는다 —
+// 조금이라도 남으면 징검다리가 언제나 싸다는 것이 계산으로 나왔기 때문이다.
+const { inkMax: INK_MAX, refund: INK_REFUND } = stage;
 
 let fail = 0;
 const check = (name, cond, extra = '') => {

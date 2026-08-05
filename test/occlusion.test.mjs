@@ -15,7 +15,11 @@ import * as B from '../src/board.js';
 import * as A from '../src/actor.js';
 import * as C from '../src/config.js';
 
-const { GRID_W, GRID_H, Z_MIN, Z_MAX, INK_MAX, INK_COST } = C;
+import { stage } from '../src/stage.js';
+
+const { GRID_W, GRID_H, Z_MIN, INK_COST } = C;
+// 상한과 배급량은 층이 쥔다 — 게임이 읽는 값을 그대로 본다.
+const { zMax: Z_MAX, inkMax: INK_MAX } = stage;
 
 let fail = 0;
 const check = (name, cond, extra = '') => {

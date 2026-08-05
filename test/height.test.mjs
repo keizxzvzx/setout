@@ -5,8 +5,14 @@
 
 const SRC = new URL('../src/', import.meta.url).href;
 
-const { GRID_W, GRID_H, TILE_H, BLOCK_H, PLATE_T, Z_MIN, Z_MAX, INK_MAX } =
+const { GRID_W, GRID_H, TILE_H, BLOCK_H, PLATE_T, Z_MIN } =
   await import(SRC + 'config.js');
+
+// 상한과 배급량은 층이 쥔다. pickAt·movePlate·카메라 여유가 전부 stage 를
+// 읽으므로 검사도 같은 것을 봐야 한다. 갈라 두면 층을 조인 뒤 검사만 옛
+// 상한으로 돌아, 틀린 채로 통과한다.
+const { stage } = await import(SRC + 'stage.js');
+const { zMax: Z_MAX, inkMax: INK_MAX } = stage;
 const { worldToScreen, screenToPlateGrid, tileDiamond, depthKey, fitView, view } =
   await import(SRC + 'iso.js');
 const { board, pickAt, movePlate, key, beginStroke, cancelStroke } =

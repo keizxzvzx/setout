@@ -4,9 +4,10 @@
 // 그래서 바닥은 끝까지 선으로만 남고, 채워지는 것은 판뿐이다.
 
 import {
-  GRID_W, GRID_H, PLATE_T, INK_MAX, VIEW_MARGIN,
+  GRID_W, GRID_H, PLATE_T, VIEW_MARGIN,
   TILE_W, TILE_H, ACTOR_R, ACTOR_H, ACTOR_W, COLOR,
 } from './config.js';
+import { stage } from './stage.js';
 import { worldToScreen, tileDiamond, depthKey, view } from './iso.js';
 import { board, parseKey, inkAvailable, cellList } from './board.js';
 import { actorScreenPos, actorDepthCell } from './actor.js';
@@ -243,8 +244,11 @@ export function drawInkGauge(ctx, viewW, viewH) {
   const x = VIEW_MARGIN;
   const y = viewH - VIEW_MARGIN - h;
 
-  const committed = Math.max(0, board.ink) / INK_MAX;
-  const available = Math.max(0, inkAvailable()) / INK_MAX;
+  // 게이지 길이는 그 층의 배급량에 대한 비율이다. 배급이 조여진 층에서는
+  // 같은 한 칸이 게이지를 더 크게 깎는다 — 디렉터가 무엇을 했는지 문구 없이
+  // 읽히는 유일한 자리다.
+  const committed = Math.max(0, board.ink) / stage.inkMax;
+  const available = Math.max(0, inkAvailable()) / stage.inkMax;
 
   ctx.save();
 

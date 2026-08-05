@@ -7,9 +7,8 @@
 // 이 분리가 있어야 획 도중 취소가 판을 건드리지 않고,
 // 나중에 잉크 게이지도 "쓴 잉크 + 긋는 중인 획"으로 미리보기가 나온다.
 
-import {
-  GRID_W, GRID_H, INK_COST, INK_REFUND, INK_REFUND_STEPPED, INK_MAX, Z_MIN, Z_MAX,
-} from './config.js';
+import { GRID_W, GRID_H, INK_COST, INK_REFUND_STEPPED, Z_MIN } from './config.js';
+import { stage } from './stage.js';
 
 export const key = (x, y) => x + ',' + y;
 
@@ -41,7 +40,7 @@ export const board = {
   plates: [],
   stroke: new Set(),      // 긋는 중인 칸들
   occupied: new Set(),    // 판에 잡힌 (x,y) 기둥들
-  ink: INK_MAX,           // 확정된 잉크. 긋는 중인 획은 아직 여기서 빠지지 않는다
+  ink: stage.inkMax,      // 확정된 잉크. 긋는 중인 획은 아직 여기서 빠지지 않는다
   actor: null,            // { x, y, path, leg, t } — 높이는 밟고 선 판에서 온다
   stepped: new Set(),     // 캐릭터가 지나간 칸. 환급받지 못한다
   goal: null,             // { x, y } 빈 바닥 칸
@@ -104,7 +103,7 @@ export function plateAt(x, y) {
 // 휠·지우기·하이라이트가 전부 이 함수를 쓰고, 5단계의
 // "겹친 후보 중 실제로 보이는 것" 도 같은 함수다.
 export function pickAt(gx, gy) {
-  for (let z = Z_MAX; z >= Z_MIN; z--) {
+  for (let z = stage.zMax; z >= Z_MIN; z--) {
     const x = gx + z;
     const y = gy + z;
     if (!inBounds(x, y)) continue;
@@ -144,7 +143,7 @@ export function cellList() {
 // 캐릭터가 화면에서 사라지고, 그 상태를 알려 줄 문구가 이 게임에는 없다.
 // 자기 말이 안 보이면 무엇을 눌러야 할지도 알 수 없다.
 export function movePlate(plate, dz) {
-  const next = Math.min(Z_MAX, Math.max(Z_MIN, plate.z + dz));
+  const next = Math.min(stage.zMax, Math.max(Z_MIN, plate.z + dz));
   if (next === plate.z) return false;
 
   const before = plate.z;
@@ -321,8 +320,8 @@ function erase(gx, gy) {
   // 캐릭터가 지나간 칸은 한 방울도 돌려주지 않는다. 이것이 징검다리 이동을
   // 막는 유일한 방법이다 — 환급이 조금이라도 남으면 앞에 그리고 뒤를 지우는
   // 쪽이 언제나 싸다는 것이 2단계에서 계산으로 나왔다.
-  const refund = board.stepped.has(key(hit.x, hit.y)) ? INK_REFUND_STEPPED : INK_REFUND;
-  board.ink = Math.min(INK_MAX, board.ink + refund);
+  const refund = board.stepped.has(key(hit.x, hit.y)) ? INK_REFUND_STEPPED : stage.refund;
+  board.ink = Math.min(stage.inkMax, board.ink + refund);
 
   const i = hit.plate.cells.findIndex((c) => c.x === hit.x && c.y === hit.y);
   if (i >= 0) hit.plate.cells.splice(i, 1);
