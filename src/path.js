@@ -34,8 +34,10 @@ export function isIllusion(a, b) {
   return a.z !== b.z;
 }
 
-const NEIGHBORS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-const skey = (x, y) => x + ',' + y;
+// 화면상 사방 인접. solver.js 도 이것을 쓴다 — 길 판정의 기준이 두 벌이 되면
+// "솔버는 풀린다는데 실제로는 못 간다" 가 된다.
+export const NEIGHBORS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+export const skey = (x, y) => x + ',' + y;
 
 // 화면 자리 → 그 자리에서 실제로 보이는 칸. 이웃 조회를 O(1) 로 만든다.
 //
@@ -58,7 +60,11 @@ const skey = (x, y) => x + ',' + y;
 // pickAt 을 부르지 않고 같은 규칙을 스냅샷 위에 다시 세운 이유는 순수성이다.
 // pickAt 은 살아 있는 board 를 읽으므로, 부르는 순간 6단계 디렉터가 가상의
 // 배치를 물어볼 수 없게 된다.
-function indexByScreen(cells) {
+//
+// 6단계 솔버도 이 함수를 그대로 부른다. "무엇이 보이는가" 의 사본이 셋이
+// 되면(render / board.pickAt / 여기) 어긋날 자리가 하나 더 늘고, 어긋난
+// 증상은 "이어져 보이는데 못 건너간다" 로만 나타난다.
+export function visibleByScreen(cells) {
   const map = new Map();
   for (const c of cells) {
     const s = screenCell(c);
@@ -72,7 +78,7 @@ function indexByScreen(cells) {
 // 스냅샷에서 화면에 실제로 보이는 칸만 남긴다.
 // 6단계 솔버가 "이 배치에서 플레이어가 볼 수 있는 것" 을 물을 때 쓴다.
 export function visibleCells(cells) {
-  return [...indexByScreen(cells).values()];
+  return [...visibleByScreen(cells).values()];
 }
 
 // 최단 경로. 없으면 null.
@@ -84,7 +90,7 @@ export function findPath(cells, from, to) {
   const at = (c) => skey(c.x, c.y);
   if (at(from) === at(to)) return [from];
 
-  const byScreen = indexByScreen(cells);
+  const byScreen = visibleByScreen(cells);
   const prev = new Map([[at(from), null]]);
   let frontier = [from];
 
