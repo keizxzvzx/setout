@@ -63,7 +63,7 @@ export const seamOk = (f, zMax) => f.z >= 1 && f.z <= zMax;
 // 올려 둔 줄은 자기 기둥을 계속 잡고 있으므로 원래 자리에는 그릴 수도 설 수도
 // 없다. 이음매를 놓는 것이 동시에 벽을 놓는 것이기도 하다.
 // ---------------------------------------------------------------------------
-function illusionLayout(rng, gridW, gridH, zMax) {
+function illusionLayout(rng, gridW, gridH, zMax, minCells) {
   if (zMax < 1) return null;
 
   const lift = pick(rng, 1, zMax);
@@ -111,20 +111,38 @@ function illusionLayout(rng, gridW, gridH, zMax) {
   if (!goals.length) return null;
   const goal = goals[pick(rng, 0, goals.length - 1)];
 
-  // 시작점은 반대쪽 끝 가까이 둔다. 이음매까지 몇 칸만 그으면 올라탈 수 있고,
-  // 목표까지 정직하게 가려면 화면 전체를 가로질러야 하는 배치가 된다.
+  // 시작점은 이음매 반대쪽 끝에서 이만큼 떨어뜨린다.
+  //
+  // 처음에는 1~3칸으로 두었다. 이음매가 공짜로 실어 주는 것이 요점이니 가까울수록
+  // 좋다고 본 것인데, 루프를 돌려 재 보니 층의 절반이 배급 10(5칸) 이하로 나왔다.
+  // 판 하나 긋고 끝나는 것은 층이 아니다.
+  //
+  // 떨어뜨리면 둘 다 늘어난다. 이음매까지 가는 다리를 실제로 놓아야 하고,
+  // 그리기만으로 가는 값은 더 크게 늘어난다 — 이음매가 화면에서 벌어 주는
+  // 거리가 그대로 차이로 남기 때문이다.
+  const START_NEAR = 5;
+  const START_FAR = 9;
+
   const f = endOf(farEnd);
   const starts = [];
 
-  for (let dx = -3; dx <= 3; dx++) {
-    for (let dy = -3; dy <= 3; dy++) {
+  for (let dx = -START_FAR; dx <= START_FAR; dx++) {
+    for (let dy = -START_FAR; dy <= START_FAR; dy++) {
       const d = Math.abs(dx) + Math.abs(dy);
-      if (d < 1 || d > 3) continue;
+      if (d < START_NEAR || d > START_FAR) continue;
 
       const x = f.x + dx;
       const y = f.y + dy;
       if (!free(x, y)) continue;
       if (x === goal.x && y === goal.y) continue;
+
+      // 그리기만으로 가는 값은 사실상 시작에서 목표까지의 맨해튼 거리다 —
+      // 이 층에서 공짜로 밟을 수 있는 것은 올려 둔 이음매뿐인데, 거기에는
+      // 정직하게 발을 디딜 수 없기 때문이다. 그래서 얕은 층인지를 솔버에게
+      // 묻지 않고 여기서 안다. 판정에 맡기면 후보의 절반 이상이 그 자리에서
+      // 떨어져 루프가 헛돈다 — 실측하니 재설계율이 62% 였다.
+      if (Math.abs(x - goal.x) + Math.abs(y - goal.y) < minCells) continue;
+
       starts.push({ x, y });
     }
   }
@@ -160,7 +178,7 @@ function illusionLayout(rng, gridW, gridH, zMax) {
 // 길이 되어 벽이 아니라 지름길이 되고, 배급이 조인 층에서는 그 지름길을
 // 찾아 꿰는 것이 그대로 퍼즐이 된다.
 // ---------------------------------------------------------------------------
-function honestLayout(rng, gridW, gridH) {
+function honestLayout(rng, gridW, gridH, minCells) {
   const lid = 0;
 
   const bridges = [];
@@ -206,7 +224,9 @@ function honestLayout(rng, gridW, gridH) {
       if (!best || d > best.d) best = { start: a, goal: b, d };
     }
   }
-  if (!best || best.d < 10) return null;
+  // 여기 미리 깔린 다리는 z=0 이라 정직하게 밟힌다. 그만큼 그리기 값이
+  // 맨해튼 거리보다 싸지므로 여유를 얹어 잡는다.
+  if (!best || best.d < minCells + 6) return null;
 
   const laid = bridges.reduce((n, f) => n + f.cells.length, 0);
 
@@ -236,13 +256,14 @@ export function design(brief = {}, rng = makeRng(1)) {
     gridW = GRID_W,
     gridH = GRID_H,
     zMax = Z_MAX,
+    minCells = MIN_CELLS,
     tries = 40,
   } = brief;
 
   for (let i = 0; i < tries; i++) {
     const c = intent === 'honest'
-      ? honestLayout(rng, gridW, gridH)
-      : illusionLayout(rng, gridW, gridH, zMax);
+      ? honestLayout(rng, gridW, gridH, minCells)
+      : illusionLayout(rng, gridW, gridH, zMax, minCells);
 
     if (!c) continue;
     if (!c.fixtures.every((f) => fixtureOk(f, c.zMax))) continue;
@@ -307,8 +328,13 @@ export function candidateCells(candidate) {
 // 층이 안 나올 때 판정이 틀린 것인지 대응이 틀린 것인지 가릴 수 없다.
 // ---------------------------------------------------------------------------
 
-// 해법이 이보다 짧으면 층이라고 할 것이 없다.
-export const MIN_CELLS = 6;
+// 그리기만으로 가는 값이 이보다 짧으면 층이라고 할 것이 없다.
+//
+// 6 에서 10 으로 올렸다. 루프를 200번 돌려 재 보니 6 에서는 층의 일부가 배급
+// 10(5칸) 이하로 나왔는데, 판 하나 긋고 끝나는 것은 층이 아니다. 10 으로 올리니
+// 그런 층이 0 개가 되고 배급 중앙값이 18(9칸)로 올라갔다. 12 도 재 봤지만
+// 시도 횟수가 최대 20회까지 늘어 값에 비해 비쌌다.
+export const MIN_CELLS = 10;
 
 const budgetFix = (inkMax, note) => ({ action: 'budget', inkMax, note });
 const redesignFix = (note) => ({ action: 'redesign', note });
@@ -424,4 +450,194 @@ export function verify(candidate, inkMax, opts = {}) {
   return out('ILLUSION_UNUSED',
     `그리기만으로 ${h} 라 배급 ${inkMax} 안에 들어온다. 착시를 쓸 이유가 없다.`,
     budgetFix(tightest, `배급을 ${tightest} 로 조인다 — 착시 ${i} 와 그리기 ${h} 사이.`));
+}
+
+// ---------------------------------------------------------------------------
+// 배급을 놓을 창
+//
+// 판정을 통과했다는 것은 지금 배급이 창 안에 있다는 뜻이지 그 값이 좋다는
+// 뜻은 아니다. 창의 바닥은 여유가 0 이라 한 칸도 헛디딜 수 없고, 천장은
+// 실험할 자리가 넉넉하다. 어디를 고를지는 층의 성격이 아니라 **플레이어의
+// 성향**이 정할 일이라, 여기서는 창만 돌려주고 고르는 것은 밖에 맡긴다.
+//
+// 망설이는 사람에게 바닥값을 주는 대응이 여기에 걸린다.
+// ---------------------------------------------------------------------------
+const snap = (x) => Math.max(INK_COST, Math.round(x / INK_COST) * INK_COST);
+
+export function budgetWindow(v) {
+  if (v.intent === 'honest') {
+    // 정직 층에는 위쪽 제약이 없다. 그래도 무한정 주면 퍼즐이 아니게 되므로
+    // 실험할 만큼만 얹는다.
+    const min = v.honestCost;
+    return { min, max: min + snap(min * 0.3) };
+  }
+
+  const min = v.illusionCost;
+
+  // 그리기로 아예 못 가는 층은 천장이 없다. 조일 이유도 없으므로 여유를 준다.
+  if (v.honestCost === null) return { min, max: min + snap(min * 0.5) };
+
+  return { min, max: Math.max(min, v.honestCost - INK_COST) };
+}
+
+// 창 안에서 배급 하나를 고른다. slack 0 이면 바닥(조임), 1 이면 천장(여유).
+export function pickBudget(window, slack = 0.5) {
+  const t = Math.min(1, Math.max(0, slack));
+  const raw = window.min + t * (window.max - window.min);
+  return Math.min(window.max, Math.max(window.min, snap(raw)));
+}
+
+// ---------------------------------------------------------------------------
+// 생성 → 검증 → 재설계
+//
+// 이 루프가 6단계의 형태 그 자체다. 실패 이유가 다음 수를 정한다 —
+// 배급 문제면 같은 지형에 배급만 바꿔 다시 묻고, 지형 문제면 새로 뽑는다.
+// 무작위로 다시 뽑기만 하면 절차적 생성이지 에이전트가 아니다.
+//
+// 배급을 0 에서 출발시킨다. 첫 판정은 반드시 실패하고, 그 fix 가 최소값을
+// 짚어 준다. 얼마를 줘야 하는지를 미리 정해 두지 않고 솔버에게 물어서 아는
+// 구조라, 지형이 바뀌면 배급도 저절로 따라온다.
+//
+// 시도 기록을 남긴다. 이것이 AI_LOG 6단계의 증거이고, 제출물 4번이 요구하는
+// "AI 활용에 대한 기술적 설명" 의 중심이다. 결과만 있고 과정이 없으면
+// 생성-검증-재설계 에이전트라는 주장을 확인할 방법이 없다.
+// ---------------------------------------------------------------------------
+export const MAX_ATTEMPTS = 24;
+
+export function direct(brief = {}, seed = 1, opts = {}) {
+  const { maxAttempts = MAX_ATTEMPTS, slack = 0.5, ...judge } = opts;
+
+  const rng = makeRng(seed);
+  const attempts = [];
+
+  let candidate = design(brief, rng);
+  let inkMax = 0;
+  let fallback = null;
+
+  const record = (a) => { attempts.push({ n: attempts.length + 1, ...a }); };
+
+  while (attempts.length < maxAttempts) {
+    if (!candidate) {
+      record({
+        code: 'NO_LAYOUT',
+        reason: '부지 안에 자리를 못 잡았다.',
+        next: '다시 뽑는다.',
+      });
+      candidate = design(brief, rng);
+      inkMax = 0;
+      continue;
+    }
+
+    const v = verify(candidate, inkMax, judge);
+
+    record({
+      code: v.code,
+      reason: v.reason,
+      inkMax,
+      illusionCost: v.illusionCost,
+      honestCost: v.honestCost,
+      next: v.fix ? v.fix.note : null,
+    });
+
+    // 풀리기만 하면 최소한 낼 수는 있다. 끝까지 못 낼 때를 대비해 잡아 둔다.
+    if (v.illusionCost !== null) fallback = { candidate, inkMax: v.illusionCost };
+
+    if (v.ok) {
+      const window = budgetWindow(v);
+      const chosen = pickBudget(window, slack);
+
+      // 창 안의 값은 반드시 통과한다. 그래도 확인하고 넘어간다 — 창 계산이
+      // 틀리면 "통과했다고 하고 못 푸는 층" 이 나가는데, 그 증상은 플레이어가
+      // 한참 그어 본 뒤에야 드러난다.
+      const again = verify(candidate, chosen, judge);
+
+      record({
+        code: again.code,
+        reason: again.reason,
+        inkMax: chosen,
+        illusionCost: again.illusionCost,
+        honestCost: again.honestCost,
+        next: `창 ${window.min}~${window.max} 에서 ${chosen} 을 골랐다.`,
+      });
+
+      const budget = again.ok ? chosen : window.min;
+
+      return {
+        ok: true,
+        seed,
+        candidate,
+        window,
+        inkMax: budget,
+        spec: toStageSpec(candidate, budget),
+        attempts,
+        reason: v.reason,
+      };
+    }
+
+    if (v.fix.action === 'budget') {
+      inkMax = v.fix.inkMax;
+      continue;
+    }
+
+    candidate = design(brief, rng);
+    inkMax = 0;
+  }
+
+  // 상한까지 못 냈다. 조용히 실패하면 게임이 멈추므로 이유를 남기고,
+  // 적어도 풀리는 것이 있으면 그것을 낸다.
+  if (fallback) {
+    return {
+      ok: false,
+      seed,
+      candidate: fallback.candidate,
+      window: { min: fallback.inkMax, max: fallback.inkMax },
+      inkMax: fallback.inkMax,
+      spec: toStageSpec(fallback.candidate, fallback.inkMax),
+      attempts,
+      reason: `${maxAttempts}번 안에 조건을 다 만족하는 층을 못 냈다. ` +
+              '풀리기는 하는 마지막 층을 낸다.',
+    };
+  }
+
+  return {
+    ok: false,
+    seed,
+    candidate: null,
+    window: null,
+    inkMax: null,
+    spec: null,
+    attempts,
+    reason: `${maxAttempts}번 안에 풀리는 층조차 못 냈다.`,
+  };
+}
+
+// 판단 기록을 사람이 읽는 줄로 편다.
+//
+// 게임 화면에는 아무것도 띄우지 않는다. 플레이어가 자기가 읽히고 있다는 것을
+// 알면 행동이 바뀌고, 그러면 읽은 성향이 성향이 아니게 된다.
+export function formatLog(result) {
+  const lines = [
+    `디렉터 — 시드 ${result.seed}, ${result.attempts.length}번 시도, ` +
+    (result.ok ? '냈다' : '못 냈다'),
+  ];
+
+  for (const a of result.attempts) {
+    const costs = a.illusionCost === undefined ? ''
+      : `  (착시 ${a.illusionCost ?? '—'} / 그리기 ${a.honestCost ?? '—'}` +
+        `, 배급 ${a.inkMax})`;
+
+    lines.push(`  ${a.n}. [${a.code}] ${a.reason}${costs}`);
+    if (a.next) lines.push(`       → ${a.next}`);
+  }
+
+  if (result.spec) {
+    lines.push(`  낸 층: 배급 ${result.inkMax}, 상한 ${result.spec.zMax}, ` +
+               `시작 (${result.spec.start.x},${result.spec.start.y}) → ` +
+               `목표 (${result.spec.goal.x},${result.spec.goal.y})`);
+    lines.push(`       ${result.candidate.note}`);
+  }
+
+  if (!result.ok) lines.push(`  ${result.reason}`);
+
+  return lines;
 }

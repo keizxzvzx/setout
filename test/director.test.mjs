@@ -12,7 +12,7 @@ import { screenCell, skey, isIllusion, usesIllusion } from '../src/path.js';
 import { minInk } from '../src/solver.js';
 import {
   makeRng, design, fixtureOk, seamOk, toStageSpec, candidateCells,
-  verify, MIN_CELLS,
+  verify, MIN_CELLS, direct, budgetWindow, pickBudget, formatLog,
 } from '../src/director.js';
 import { makeStage } from '../src/stage.js';
 
@@ -348,9 +348,9 @@ const scene = (intent) => ({
 
   // 이음매가 값을 못 깎으면 끼울 자리가 없다
   const useless = verify({
-    intent: 'illusion', start: { x: 3, y: 3 }, goal: { x: 3, y: 12 }, zMax: 8,
+    intent: 'illusion', start: { x: 3, y: 3 }, goal: { x: 3, y: 14 }, zMax: 8,
     fixtures: [{ cells: [{ x: 15, y: 15 }], z: 1 }], note: '',
-  }, 20);
+  }, 24);
   check('두 값이 같으면 조일 자리가 없다', useless.code === 'NO_BUDGET_WINDOW',
         `${useless.code} — 착시 ${useless.illusionCost} / 그리기 ${useless.honestCost}`);
   check('지형을 다시 짜라고 한다', useless.fix.action === 'redesign');
@@ -454,6 +454,173 @@ const scene = (intent) => ({
   check('최소 칸수 기준을 밖에서 바꿀 수 있다',
         verify(scene('illusion'), 30, { minCells: 99 }).code === 'TOO_SHALLOW',
         `기본 ${MIN_CELLS}`);
+}
+
+// ---------------------------------------------------------------------------
+// 15. 재설계 루프 — 실패 이유가 다음 수를 정한다
+// ---------------------------------------------------------------------------
+const RUNS = [];
+for (let seed = 1; seed <= 100; seed++) RUNS.push(direct({ intent: 'illusion' }, seed));
+const HRUNS = [];
+for (let seed = 1; seed <= 100; seed++) HRUNS.push(direct({ intent: 'honest' }, seed));
+
+{
+  const failed = RUNS.filter((r) => !r.ok);
+  check('착시 층을 100개 시드에서 다 낸다', failed.length === 0,
+        failed.length ? failed[0].reason : '');
+  check('정직 층을 100개 시드에서 다 낸다', HRUNS.every((r) => r.ok));
+
+  // 낸 층은 자기가 정한 배급으로 다시 물어도 통과해야 한다.
+  // 이것이 어긋나면 통과했다고 하고 못 푸는 층이 나간다.
+  const bad = [...RUNS, ...HRUNS].filter((r) => !verify(r.candidate, r.inkMax).ok);
+  check('낸 층은 전부 자기 배급으로 다시 물어도 통과한다', bad.length === 0,
+        `${bad.length}건`);
+
+  const shortRun = RUNS.filter((r) => r.attempts.length < 2);
+  check('한 번에 통과한 층은 없다 — 배급 0 에서 출발한다', shortRun.length === 0,
+        `${shortRun.length}건`);
+  check('첫 시도는 반드시 실패다', RUNS.every((r) => r.attempts[0].code !== 'OK'),
+        RUNS[0].attempts[0].code);
+  check('마지막 시도는 통과다', RUNS.every((r) => r.attempts.at(-1).code === 'OK'));
+
+  const tries = RUNS.map((r) => r.attempts.length);
+  check('평범한 요구에는 헛돌지 않는다', Math.max(...tries) <= 8,
+        `최대 ${Math.max(...tries)}회`);
+  console.log(`      시도 횟수  최소 ${Math.min(...tries)} / ` +
+              `최대 ${Math.max(...tries)} / ` +
+              `평균 ${(tries.reduce((a, b) => a + b, 0) / tries.length).toFixed(1)}`);
+
+  // 재설계 경로가 실제로 도는가.
+  //
+  // 생성기가 얕은 층을 스스로 걸러내게 한 뒤로 기본 요구에서는 재설계가
+  // 거의 안 난다(200층 중 2층). 좋은 일이지만, 그래서 기본 배치로는 이 길을
+  // 밟아 볼 수 없다. 요구를 조여 일부러 밟는다.
+  const hard = [];
+  for (let seed = 1; seed <= 40; seed++) {
+    hard.push(direct({ intent: 'illusion' }, seed, { minCells: 14 }));
+  }
+
+  const redesigned = hard.filter((r) =>
+    r.attempts.some((a) => a.code === 'TOO_SHALLOW'));
+
+  check('요구를 조이면 재설계를 거친다', redesigned.length > hard.length / 2,
+        `${redesigned.length}/${hard.length} 층이 지형을 다시 뽑았다`);
+  check('재설계를 거쳐도 결국 낸다', hard.every((r) => r.ok),
+        `${hard.filter((r) => !r.ok).length}건 실패`);
+  check('재설계한 층도 조인 요구를 만족한다',
+        hard.every((r) => verify(r.candidate, r.inkMax, { minCells: 14 }).ok));
+}
+
+// ---------------------------------------------------------------------------
+// 16. 재현성 — 같은 시드면 같은 층, 같은 판단
+// ---------------------------------------------------------------------------
+{
+  const a = direct({ intent: 'illusion' }, 17);
+  const b = direct({ intent: 'illusion' }, 17);
+  const c = direct({ intent: 'illusion' }, 18);
+
+  check('같은 시드는 같은 층', JSON.stringify(a.spec) === JSON.stringify(b.spec));
+  check('같은 시드는 같은 판단 기록',
+        JSON.stringify(a.attempts) === JSON.stringify(b.attempts));
+  check('다른 시드는 다른 층', JSON.stringify(a.spec) !== JSON.stringify(c.spec));
+}
+
+// ---------------------------------------------------------------------------
+// 17. 배급의 창 — 조일 수도 있고 열어 줄 수도 있는가
+//
+// 창의 바닥은 여유가 0 이라 한 칸도 헛디딜 수 없고, 천장은 실험할 자리가
+// 넉넉하다. 망설이는 사람에게 바닥값을 주는 대응이 여기에 걸린다.
+// ---------------------------------------------------------------------------
+{
+  const tight = direct({ intent: 'illusion' }, 3, { slack: 0 });
+  const loose = direct({ intent: 'illusion' }, 3, { slack: 1 });
+
+  check('같은 시드에서 창은 같다',
+        JSON.stringify(tight.window) === JSON.stringify(loose.window),
+        `${tight.window.min}~${tight.window.max}`);
+  check('조이면 창의 바닥', tight.inkMax === tight.window.min, `${tight.inkMax}`);
+  check('열면 창의 천장', loose.inkMax === loose.window.max, `${loose.inkMax}`);
+  check('바닥이 천장보다 작거나 같다', tight.inkMax <= loose.inkMax);
+  check('둘 다 판정을 통과한다',
+        verify(tight.candidate, tight.inkMax).ok && verify(loose.candidate, loose.inkMax).ok);
+
+  // 창의 어디를 잡아도 통과해야 한다
+  let offWindow = 0;
+  for (const r of RUNS) {
+    for (const s of [0, 0.25, 0.5, 0.75, 1]) {
+      const b = pickBudget(r.window, s);
+      if (b < r.window.min || b > r.window.max) { offWindow++; continue; }
+      if (!verify(r.candidate, b).ok) offWindow++;
+    }
+  }
+  check(`창 안의 어떤 값으로도 통과한다 (${RUNS.length}층 × 5)`, offWindow === 0,
+        `${offWindow}건`);
+
+  // 창 밖은 통과하면 안 된다 — 천장 바로 위는 그리기가 열리는 자리다
+  const w = RUNS[0];
+  const over = verify(w.candidate, w.window.max + 2);
+  check('창 천장을 넘기면 착시를 안 쓴다', !over.ok,
+        `${w.window.max + 2} → ${over.code}`);
+}
+
+// ---------------------------------------------------------------------------
+// 18. 못 낼 때 조용히 실패하지 않는가
+//
+// 게임이 멈추는 것보다 나쁜 것은 왜 멈췄는지 모르는 것이다.
+// ---------------------------------------------------------------------------
+{
+  const giveUp = direct({ intent: 'illusion' }, 5, { maxAttempts: 1 });
+
+  check('시도 상한에 걸리면 못 냈다고 한다', !giveUp.ok, `ok=${giveUp.ok}`);
+  check('이유를 남긴다', /못 냈다/.test(giveUp.reason), giveUp.reason);
+  check('그래도 낼 것은 낸다', !!giveUp.spec);
+  check('낸 것은 적어도 풀린다',
+        !!minInk(candidateCells(giveUp.candidate),
+                { x: giveUp.candidate.start.x, y: giveUp.candidate.start.y, z: 0 },
+                giveUp.candidate.goal));
+
+  // 아무리 조여도 조건을 못 맞추는 요구 — 최소 칸수를 부지보다 크게 잡는다
+  const never = direct({ intent: 'illusion' }, 5, { maxAttempts: 6, minCells: 999 });
+  check('맞출 수 없는 요구에는 끝까지 못 낸다고 한다', !never.ok);
+  check('그 시도 기록도 남는다', never.attempts.length === 6, `${never.attempts.length}회`);
+  check('전부 같은 이유로 떨어졌다',
+        never.attempts.every((a) => a.code === 'TOO_SHALLOW'),
+        [...new Set(never.attempts.map((a) => a.code))].join(', '));
+}
+
+// ---------------------------------------------------------------------------
+// 19. 판단 기록이 읽히는가
+// ---------------------------------------------------------------------------
+{
+  const r = direct({ intent: 'illusion' }, 2);
+  const lines = formatLog(r);
+
+  check('기록이 줄로 나온다', lines.length >= r.attempts.length + 1, `${lines.length}줄`);
+  check('시도마다 코드와 이유가 있다',
+        r.attempts.every((a) => a.code && a.reason && a.reason.length > 4));
+  check('고칠 것이 있는 시도에는 다음 수가 적혀 있다',
+        r.attempts.filter((a) => a.code !== 'OK').every((a) => !!a.next));
+  check('낸 층의 근거가 마지막에 붙는다', /낸 층/.test(lines.join('\n')));
+
+  console.log('\n      ── 판단 기록 (시드 2) ' + '─'.repeat(38));
+  for (const l of lines) console.log('      ' + l);
+  console.log('      ' + '─'.repeat(60) + '\n');
+}
+
+// ---------------------------------------------------------------------------
+// 20. 루프도 board 를 읽지 않는가
+// ---------------------------------------------------------------------------
+{
+  B.board.plates.length = 0;
+  B.board.occupied.clear();
+  const clean = direct({ intent: 'illusion' }, 11);
+
+  B.addPlate([{ x: 5, y: 5 }, { x: 6, y: 5 }, { x: 7, y: 5 }], 3);
+  const dirty = direct({ intent: 'illusion' }, 11);
+
+  check('board 를 채워도 같은 층이 나온다',
+        JSON.stringify(clean.spec) === JSON.stringify(dirty.spec));
+  check('층을 내도 board 는 그대로다', B.board.plates.length === 1);
 }
 
 // ---------------------------------------------------------------------------
