@@ -114,6 +114,24 @@ export function pickAt(gx, gy) {
   return null;
 }
 
+// 층 하나를 걷어낸다.
+//
+// 무엇을 남기는가가 이 함수의 전부다. stats 는 남긴다 — 지우면 디렉터가 매 층
+// 백지에서 읽게 되고, 그러면 플레이어를 읽는다는 말이 성립하지 않는다.
+// 나머지는 전부 그 층의 것이라 지운다.
+export function resetBoard() {
+  board.plates = [];
+  board.occupied.clear();
+  board.stepped.clear();
+  board.erased.clear();
+  board.actor = null;
+  board.goal = null;
+  board.cleared = false;
+  board.ink = stage.inkMax;
+
+  cancelStroke();   // 긋던 획과 lastCell 까지 같이 턴다
+}
+
 // 미리 깔아 두는 판. 잉크를 쓰지 않는다.
 //
 // 시작 발판과, 나중에 디렉터가 놓을 고정 구조물이 이것으로 들어온다.

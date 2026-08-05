@@ -44,7 +44,20 @@ export function setView(ox, oy, scale) {
 // 여유를 현재 최고 판 높이에 맞춰 그때그때 다시 잡는 방법도 있지만,
 // 판을 올릴 때마다 화면이 확대·축소되면 무엇이 움직인 것인지 알 수 없게 된다.
 // 착시는 화면상 정렬을 읽는 게임이므로 프레임은 고정되어 있어야 한다.
+// 마지막으로 맞춘 창 크기. 층이 바뀌어 높이 상한이 달라지면 같은 크기로
+// 다시 잡아야 하는데, 부르는 쪽이 창 크기를 들고 있을 이유는 없다.
+let lastW = 0;
+let lastH = 0;
+
+// 창은 그대로인데 층이 바뀌었을 때. 상한을 바꾼 쪽이 이 한 줄만 부르면 된다.
+export function refit() {
+  if (lastW && lastH) fitView(lastW, lastH);
+}
+
 export function fitView(viewW, viewH) {
+  lastW = viewW;
+  lastH = viewH;
+
   const left   = -GRID_H * (TILE_W / 2);
   const right  =  GRID_W * (TILE_W / 2);
   // 여유는 층의 높이 상한에서 파생된다. 층이 바뀌어 zMax 가 달라지면

@@ -1,9 +1,9 @@
 // SETOUT — 진입점
 
-import { stage } from './stage.js';
 import { fitView } from './iso.js';
-import { board, addPlate } from './board.js';
-import { placeActor, updateActor } from './actor.js';
+import { board } from './board.js';
+import { updateActor } from './actor.js';
+import { beginRun, nextStage } from './session.js';
 import {
   clear, drawFloor, drawGoal, drawPlates, drawStroke, drawHoverCell, drawInkGauge,
 } from './render.js';
@@ -15,23 +15,9 @@ const ctx = canvas.getContext('2d');
 let viewW = 0;
 let viewH = 0;
 
-// 지금 층의 명세대로 판을 놓는다. 어느 값을 쓸지는 stage 가 이미 정해 두었고
-// 여기서는 그대로 세우기만 한다 — 1층이든 디렉터가 낸 층이든 같은 코드를 탄다.
-//
-// 시작 발판은 한 칸뿐이다. 판이 없으면 캐릭터가 설 자리가 없어서 하나는
-// 필요하지만, 넓게 깔면 그리기를 배우기 전에 걷기부터 하게 된다.
-// 한 칸만 주면 갈 곳이 없으므로 무조건 바닥을 문질러 보게 된다.
-//
-// 고정 구조물은 잉크를 쓰지 않고 미리 깔린다. 획으로 만든 판과 자료 구조가
-// 같으므로 지우기·높이 조절이 그대로 먹는다 — 디렉터가 놓아 준 이음매를
-// 플레이어가 다시 만질 수 있다는 뜻이다.
-function setupStage() {
-  addPlate([stage.start]);
-  for (const f of stage.fixtures) addPlate(f.cells, f.z);
-
-  placeActor(stage.start.x, stage.start.y);
-  board.goal = { ...stage.goal };
-}
+// 목표에 닿고 나서 다음 층까지 두는 사이. 도착한 것을 볼 새는 줘야 한다.
+const CLEAR_PAUSE = 1.2;
+let clearedFor = 0;
 
 function resize() {
   const dpr = window.devicePixelRatio || 1;
@@ -57,6 +43,15 @@ function frame(now) {
 
   updateActor(dt);
 
+  // 도착하면 잠깐 두었다가 다음 층으로. 디렉터는 여기서 처음 불린다.
+  if (board.cleared) {
+    clearedFor += dt;
+    if (clearedFor >= CLEAR_PAUSE) {
+      clearedFor = 0;
+      nextStage();
+    }
+  }
+
   clear(ctx, viewW, viewH);
   drawFloor(ctx);
   drawGoal(ctx);        // 바닥에 찍힌 표식. 판을 깔면 가려지는 것이 맞다
@@ -71,6 +66,9 @@ function frame(now) {
 
 window.addEventListener('resize', resize);
 attachPointer(canvas);
-setupStage();
+
+// 창 크기를 먼저 잡는다. 층을 세울 때 iso 가 그 크기를 기억하고 있어야
+// 상한이 바뀔 때마다 같은 창에 다시 맞출 수 있다.
 resize();
+beginRun();
 requestAnimationFrame(frame);
