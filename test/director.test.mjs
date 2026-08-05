@@ -8,10 +8,11 @@
 
 import * as C from '../src/config.js';
 import * as B from '../src/board.js';
-import { screenCell, skey, isIllusion } from '../src/path.js';
+import { screenCell, skey, isIllusion, usesIllusion } from '../src/path.js';
 import { minInk } from '../src/solver.js';
 import {
   makeRng, design, fixtureOk, seamOk, toStageSpec, candidateCells,
+  verify, MIN_CELLS,
 } from '../src/director.js';
 import { makeStage } from '../src/stage.js';
 
@@ -270,6 +271,189 @@ const HONEST = batch('honest');
   B.addPlate([{ x: 1, y: 1 }, { x: 2, y: 1 }], 0);
   const c2 = design({ intent: 'illusion' }, makeRng(9));
   check('board 상태가 층을 바꾸지 않는다', JSON.stringify(c) === JSON.stringify(c2));
+}
+
+// ---------------------------------------------------------------------------
+// 10. 판정 — 두 숫자의 부등식이 전부다
+//
+// 손으로 만든 배치로 각 실패를 하나씩 불러낸다. 생성기가 우연히 그 상황을
+// 내주기를 기다리면 어떤 실패는 영영 안 밟아 보게 된다.
+//
+// 기준 배치는 solver 묶음이 쓰던 것과 같다. 착시로 22, 그리기만으로 34.
+// ---------------------------------------------------------------------------
+const seam = [];
+for (let x = 6; x <= 13; x++) seam.push({ x, y: 13 });
+
+const scene = (intent) => ({
+  intent,
+  start: { x: 3, y: 3 },
+  goal: { x: 12, y: 11 },
+  zMax: 8,
+  fixtures: [{ cells: seam, z: 1 }],
+  note: '검사용',
+});
+
+{
+  const base = verify(scene('illusion'), 30);
+  check('두 값을 다 잰다', base.illusionCost === 22 && base.honestCost === 34,
+        `착시 ${base.illusionCost} / 그리기 ${base.honestCost}`);
+
+  check('배급이 그 사이면 통과', base.ok && base.code === 'OK', base.code);
+  check('통과한 층에는 고칠 것이 없다', base.fix === null);
+
+  const loose = verify(scene('illusion'), 40);
+  check('배급이 헐거우면 착시를 안 쓴다', loose.code === 'ILLUSION_UNUSED', loose.code);
+  check('조일 자리를 짚어 준다',
+        loose.fix.action === 'budget' && loose.fix.inkMax === 32,
+        `→ ${loose.fix.inkMax}`);
+
+  const poor = verify(scene('illusion'), 10);
+  check('배급이 모자라면 아예 못 푼다', poor.code === 'OVER_BUDGET', poor.code);
+  check('얼마가 필요한지 짚어 준다',
+        poor.fix.action === 'budget' && poor.fix.inkMax === 22, `→ ${poor.fix.inkMax}`);
+
+  // 같은 지형을 정직 의도로 내면 정반대 판정이 나온다
+  const forced = verify(scene('honest'), 25);
+  check('정직 의도인데 배급이 조이면 착시를 강요한다',
+        forced.code === 'ILLUSION_FORCED', forced.code);
+  check('배급을 열어 주라고 한다',
+        forced.fix.action === 'budget' && forced.fix.inkMax === 34, `→ ${forced.fix.inkMax}`);
+
+  const leaky = verify(scene('honest'), 40);
+  check('정직 의도인데 착시가 더 싸면 지형을 다시 짜라고 한다',
+        leaky.code === 'ILLUSION_CHEAPER', leaky.code);
+  check('배급으로는 못 고친다고 한다', leaky.fix.action === 'redesign', leaky.fix.action);
+}
+
+{
+  // 너무 짧은 층
+  const shallow = verify({
+    intent: 'illusion', start: { x: 3, y: 3 }, goal: { x: 3, y: 6 },
+    zMax: 8, fixtures: [], note: '',
+  }, 60);
+  check('세 칸짜리 해법은 층이 아니다', shallow.code === 'TOO_SHALLOW', shallow.code);
+  check('목표를 밀어내라고 한다', shallow.fix.action === 'redesign');
+
+  // 아예 못 가는 층 — 목표를 기둥으로 둘러싼다
+  const walled = verify({
+    intent: 'illusion', start: { x: 0, y: 0 }, goal: { x: 5, y: 5 }, zMax: 8,
+    fixtures: [
+      { cells: [{ x: 4, y: 5 }], z: 7 }, { cells: [{ x: 6, y: 5 }], z: 7 },
+      { cells: [{ x: 5, y: 4 }], z: 7 }, { cells: [{ x: 5, y: 6 }], z: 7 },
+    ],
+    note: '',
+  }, 200);
+  check('닿을 길이 없으면 못 푼다고 한다', walled.code === 'UNSOLVABLE', walled.code);
+  check('두 값 다 없다', walled.illusionCost === null && walled.honestCost === null);
+
+  // 이음매가 값을 못 깎으면 끼울 자리가 없다
+  const useless = verify({
+    intent: 'illusion', start: { x: 3, y: 3 }, goal: { x: 3, y: 12 }, zMax: 8,
+    fixtures: [{ cells: [{ x: 15, y: 15 }], z: 1 }], note: '',
+  }, 20);
+  check('두 값이 같으면 조일 자리가 없다', useless.code === 'NO_BUDGET_WINDOW',
+        `${useless.code} — 착시 ${useless.illusionCost} / 그리기 ${useless.honestCost}`);
+  check('지형을 다시 짜라고 한다', useless.fix.action === 'redesign');
+}
+
+// ---------------------------------------------------------------------------
+// 11. 짚어 준 대로 고치면 그 실패는 다시 안 난다
+//
+// 판정이 이유만 대고 방향을 안 주면 재설계는 무작위 재추첨이 된다.
+// fix 가 실제로 다음 수정을 지시하는지 확인한다.
+// ---------------------------------------------------------------------------
+{
+  let stuck = 0;
+  let byBudget = 0;
+  let byRedesign = 0;
+
+  for (const { c } of ILLUSION) {
+    // 배급 0 에서 출발한다. 통과할 수는 없다.
+    const first = verify(c, 0);
+    if (first.ok) { stuck++; continue; }
+
+    // 지형이 문제라고 하면 배급으로 고칠 것이 아니다. 이것도 정당한 답이다 —
+    // 처음에는 배급 0 이면 무조건 OVER_BUDGET 이 난다고 보고 재설계 신호를
+    // 제자리로 세었다. 판정이 아니라 검사 쪽이 틀렸다.
+    if (first.fix.action === 'redesign') { byRedesign++; continue; }
+
+    const second = verify(c, first.fix.inkMax);
+    if (second.code === first.code) { stuck++; continue; }
+
+    byBudget++;
+  }
+
+  check(`짚어 준 배급으로 고치면 같은 실패가 안 난다 (${ILLUSION.length}층)`,
+        stuck === 0, `${stuck}건 제자리`);
+  check('배급 하나로 풀리는 층이 대부분', byBudget > byRedesign,
+        `배급 ${byBudget} / 재설계 ${byRedesign}`);
+  check('재설계가 필요한 층이 3분의 1 미만', byRedesign / ILLUSION.length < 0.34,
+        `${byRedesign}/${ILLUSION.length}`);
+}
+
+// ---------------------------------------------------------------------------
+// 12. 통과한 착시 층은 정말 착시를 요구하는가
+//
+// 판정은 honestCost > inkMax 라는 부등식으로만 말한다. 그것이 곧 "최소 해법이
+// 착시를 쓴다" 인지를 경로의 간선으로 되짚는다.
+// ---------------------------------------------------------------------------
+{
+  let passed = 0;
+  let withoutIllusion = 0;
+
+  for (const { c } of ILLUSION) {
+    const r = verify(c, 0);
+    if (r.code !== 'OVER_BUDGET') continue;
+
+    // 착시로 딱 풀리는 만큼만 배급한다 — 가장 조인 상태
+    const v = verify(c, r.fix.inkMax);
+    if (!v.ok) continue;
+
+    passed++;
+    if (!usesIllusion(v.illusion.path)) withoutIllusion++;
+  }
+
+  check(`통과한 층의 최소 해법은 착시를 쓴다 (${passed}층)`, withoutIllusion === 0,
+        `${withoutIllusion}건`);
+  check('통과한 층이 있다', passed > 0, `${passed}층`);
+}
+
+// ---------------------------------------------------------------------------
+// 13. 정직 층도 판정을 통과하는가
+// ---------------------------------------------------------------------------
+{
+  let ok = 0;
+  const codes = new Map();
+
+  for (const { c } of HONEST) {
+    const first = verify(c, 0);
+    const v = first.fix?.action === 'budget' ? verify(c, first.fix.inkMax) : first;
+
+    codes.set(v.code, (codes.get(v.code) ?? 0) + 1);
+    if (v.ok) ok++;
+  }
+
+  check(`정직 층은 배급만 맞추면 통과한다 (${HONEST.length}층)`, ok === HONEST.length,
+        [...codes].map(([k, n]) => `${k} ${n}`).join(', '));
+}
+
+// ---------------------------------------------------------------------------
+// 14. 판정도 board 를 읽지 않는가
+// ---------------------------------------------------------------------------
+{
+  B.board.plates.length = 0;
+  B.board.occupied.clear();
+  const empty = verify(scene('illusion'), 30);
+
+  B.addPlate([{ x: 12, y: 11 }, { x: 11, y: 11 }], 0);   // 목표 자리를 실제로 메운다
+  const filled = verify(scene('illusion'), 30);
+
+  check('board 를 채워도 판정이 안 바뀐다',
+        empty.code === filled.code && empty.illusionCost === filled.illusionCost,
+        `${empty.code}/${empty.illusionCost} vs ${filled.code}/${filled.illusionCost}`);
+  check('최소 칸수 기준을 밖에서 바꿀 수 있다',
+        verify(scene('illusion'), 30, { minCells: 99 }).code === 'TOO_SHALLOW',
+        `기본 ${MIN_CELLS}`);
 }
 
 // ---------------------------------------------------------------------------

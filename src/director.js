@@ -9,8 +9,9 @@
 // path.js·solver.js 와 같은 규율을 지킨다: board 도 stage 도 읽지 않는다.
 // 아직 세우지 않은 층을 값으로 다루는 것이 이 파일의 존재 이유다.
 
-import { GRID_W, GRID_H, Z_MAX } from './config.js';
+import { GRID_W, GRID_H, Z_MAX, INK_COST } from './config.js';
 import { screenCell, skey } from './path.js';
+import { minInk } from './solver.js';
 
 // 시드 고정 난수 (mulberry32).
 //
@@ -280,4 +281,147 @@ export function candidateCells(candidate) {
   }
 
   return cells;
+}
+
+// ---------------------------------------------------------------------------
+// 판정
+//
+// 계획서의 검증 3항목이 전부 두 숫자의 부등식으로 떨어진다.
+//
+//   풀리는가                    illusionCost 가 있는가
+//   배급량 안에서 풀리는가      illusionCost ≤ inkMax
+//   최소 해법이 착시를 요구하는가  honestCost > inkMax
+//
+// 세 번째가 이 판정의 중심이다. 착시를 강제한다는 것은 결국 **배급량을
+// illusionCost 와 honestCost 사이에 끼우는 것**이고, 그 구간이 비면 어떤
+// 배급량으로도 안 되므로 지형을 다시 설계하라는 신호가 된다.
+//
+// honestCost 는 "판을 하나도 건드리지 않고 그리기만으로 가는 값" 이다.
+// 플레이어가 판을 올려 더 싸게 푸는 경우까지는 세지 않는다 — 솔버가 높이
+// 조절을 탐색하지 않기로 한 결정이 여기까지 이어진다. 그래도 판정의 뜻은
+// 남는다. 이 값이 배급을 넘으면 **그리기만으로는 갈 수 없다**는 것이 보장되고,
+// 그 순간 플레이어는 높이라는 도구를 꺼낼 수밖에 없다.
+//
+// 판정만 하고 고치지는 않는다. fix 는 다음에 무엇을 바꿀지 적어 낼 뿐이고,
+// 그것을 실제로 돌리는 것은 재설계 루프의 몫이다. 판정과 대응을 섞으면
+// 층이 안 나올 때 판정이 틀린 것인지 대응이 틀린 것인지 가릴 수 없다.
+// ---------------------------------------------------------------------------
+
+// 해법이 이보다 짧으면 층이라고 할 것이 없다.
+export const MIN_CELLS = 6;
+
+const budgetFix = (inkMax, note) => ({ action: 'budget', inkMax, note });
+const redesignFix = (note) => ({ action: 'redesign', note });
+
+export function verify(candidate, inkMax, opts = {}) {
+  const { minCells = MIN_CELLS } = opts;
+
+  const cells = candidateCells(candidate);
+  const from = { x: candidate.start.x, y: candidate.start.y, z: 0 };
+
+  const illusion = minInk(cells, from, candidate.goal);
+  const honest = minInk(cells, from, candidate.goal, { allowIllusion: false });
+
+  const i = illusion ? illusion.cost : null;
+  const h = honest ? honest.cost : null;
+
+  const out = (code, reason, fix = null) => ({
+    ok: code === 'OK',
+    code,
+    reason,
+    fix,
+    intent: candidate.intent,
+    inkMax,
+    illusionCost: i,
+    honestCost: h,
+    illusion,
+    honest,
+  });
+
+  if (!illusion) {
+    return out('UNSOLVABLE',
+      '착시를 써도 목표에 닿는 길이 없다.',
+      redesignFix('목표를 당기거나 구조물을 하나 더 놓는다.'));
+  }
+
+  // 정직 의도인데 정직한 길이 아예 없으면 배급으로는 어쩔 수 없다.
+  if (candidate.intent === 'honest' && !honest) {
+    return out('ILLUSION_FORCED',
+      '정직하게 지으라고 낸 층인데, 그리기만으로 가는 길이 아예 없다.',
+      redesignFix('길을 막고 있는 구조물을 치운다.'));
+  }
+
+  // 깊이는 **그리기만으로 가는 값**으로 잰다.
+  //
+  // 착시 층은 설계상 그리는 칸이 적다 — 이음매가 공짜로 실어 주는 것이 요점이라
+  // 서너 칸만 그으면 닿는다. 그것을 얕다고 떨어뜨리면 잘 만든 착시 층이 전부
+  // 걸린다. 처음에 의도한 해법의 길이로 쟀다가 100층 중 97층이 여기서 걸렸다.
+  //
+  // 층이 시시한 것은 그리는 칸이 적어서가 아니라 **그냥 그려서 가도 싸서**다.
+  // 그 값이 작으면 배급을 어떻게 조여도 착시를 쓸 이유가 생기지 않는다.
+  // 그리기로 아예 못 가는 층은 그 자체로 얕지 않으므로 착시 값으로 대신 잰다.
+  const floor = honest ? honest.cost : illusion.cost;
+  const floorCells = floor / INK_COST;
+
+  if (floorCells < minCells) {
+    return out('TOO_SHALLOW',
+      `그냥 그려도 ${floorCells}칸이면 닿는다. 층이라고 할 것이 없다.`,
+      redesignFix(`목표를 밀어낸다 — 그리기로 최소 ${minCells}칸.`));
+  }
+
+  if (candidate.intent === 'honest') {
+    // 착시가 더 싸면 착시만 노리는 사람에게 그대로 질러갈 구멍을 주는 셈이다.
+    if (i < h) {
+      if (i <= inkMax && inkMax < h) {
+        return out('ILLUSION_FORCED',
+          `정직한 길이 ${h} 인데 배급이 ${inkMax} 다. ` +
+          '정직하게 지으라고 낸 층이 착시를 강요하고 있다.',
+          budgetFix(h, `배급을 ${h} 로 올려 정직한 길을 열어 준다.`));
+      }
+      return out('ILLUSION_CHEAPER',
+        `착시가 ${i} 로 정직한 ${h} 보다 싸다. 배급을 조여도 착시 쪽이 먼저 열린다.`,
+        redesignFix('정렬이 성립하지 않도록 상한을 조이거나 구조물을 눕힌다.'));
+    }
+
+    if (h > inkMax) {
+      return out('OVER_BUDGET',
+        `정직한 최소 해법이 ${h} 인데 배급이 ${inkMax} 다.`,
+        budgetFix(h, `배급을 ${h} 로 올린다.`));
+    }
+
+    return out('OK', `그리기만으로 ${h} 에 풀린다. 맞출 정렬은 없다.`);
+  }
+
+  // --- 착시 의도 ---
+
+  if (i > inkMax) {
+    return out('OVER_BUDGET',
+      `최소 해법이 ${i} 인데 배급이 ${inkMax} 다. 아예 못 푼다.`,
+      budgetFix(i, `배급을 ${i} 로 올린다.`));
+  }
+
+  // 정직한 길이 없으면 착시가 유일한 길이다 — 원하던 것보다 더 확실하다.
+  if (h === null) return out('OK', `그리기만으로는 갈 수 없고, 착시로 ${i} 에 풀린다.`);
+
+  if (h > inkMax) {
+    return out('OK',
+      `착시로 ${i}, 그리기만으로는 ${h}. 배급 ${inkMax} 안에서는 착시뿐이다.`);
+  }
+
+  // 정직한 길이 배급 안에 있다. 조일 자리가 남았는가?
+  //
+  // 배급 b 는 i ≤ b < h 를 만족해야 한다. 값이 전부 INK_COST 의 배수이므로
+  // 조일 수 있는 최대값은 h − INK_COST 이고, 그것이 i 보다 작으면 구간이 비었다.
+  const tightest = h - INK_COST;
+
+  if (tightest < i) {
+    return out('NO_BUDGET_WINDOW',
+      `착시 ${i} 와 그리기 ${h} 사이에 끼울 자리가 없다. ` +
+      '어떤 배급량으로도 착시를 강제할 수 없다.',
+      redesignFix('이음매를 목표에서 더 먼 자리로 옮겨 그리기 값을 키운다.'));
+  }
+
+  return out('ILLUSION_UNUSED',
+    `그리기만으로 ${h} 라 배급 ${inkMax} 안에 들어온다. 착시를 쓸 이유가 없다.`,
+    budgetFix(tightest, `배급을 ${tightest} 로 조인다 — 착시 ${i} 와 그리기 ${h} 사이.`));
 }
