@@ -12,6 +12,7 @@
 import { GRID_W, GRID_H, Z_MAX, INK_COST } from './config.js';
 import { screenCell, skey } from './path.js';
 import { minInk } from './solver.js';
+import { profileOf, briefFor } from './profile.js';
 
 // 시드 고정 난수 (mulberry32).
 //
@@ -611,6 +612,26 @@ export function direct(brief = {}, seed = 1, opts = {}) {
   };
 }
 
+// 플레이어를 읽고 그 사람이 피하는 것을 낸다.
+//
+// 6단계의 한 문장이 이 함수다. 지금까지는 무엇을 요구하는 층인지 부르는 쪽이
+// 적어 냈지만, 여기서부터는 플레이어가 정한다.
+export function directFor(stats, context = {}, seed = 1, opts = {}) {
+  const { zMax, previous = null, ...rest } = opts;
+
+  const profile = profileOf(stats, context);
+  const read = briefFor(profile, { zMax, previous });
+  const result = direct(read.brief, seed, { ...rest, slack: read.slack });
+
+  return {
+    ...result,
+    profile,
+    intent: read.brief.intent,
+    slack: read.slack,
+    read: read.note,
+  };
+}
+
 // 판단 기록을 사람이 읽는 줄로 편다.
 //
 // 게임 화면에는 아무것도 띄우지 않는다. 플레이어가 자기가 읽히고 있다는 것을
@@ -620,6 +641,8 @@ export function formatLog(result) {
     `디렉터 — 시드 ${result.seed}, ${result.attempts.length}번 시도, ` +
     (result.ok ? '냈다' : '못 냈다'),
   ];
+
+  if (result.read) lines.push(`  읽음: ${result.read}`);
 
   for (const a of result.attempts) {
     const costs = a.illusionCost === undefined ? ''
