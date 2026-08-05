@@ -357,6 +357,55 @@ const scene = (intent) => ({
 }
 
 // ---------------------------------------------------------------------------
+// 10-b. 고르게 하는 층 — 둘 다 갈 수 있어야 물어본 것이다
+//
+// 맞서기만 해서는 성향을 읽을 수 없다. 착시를 강제하면 누구나 이음매를
+// 건너고, 정렬을 없애면 아무도 못 건넌다. 디렉터가 만든 층이 다음 판단의
+// 입력이 되어, 읽었다고 한 것이 자기가 낸 것이 된다.
+// ---------------------------------------------------------------------------
+{
+  const tight = verify(scene('open'), 30);
+  check('비싼 쪽이 배급 밖이면 고를 수 없다', tight.code === 'OVER_BUDGET', tight.code);
+  check('비싼 쪽까지 닿게 올리라고 한다',
+        tight.fix.action === 'budget' && tight.fix.inkMax === 34, `→ ${tight.fix.inkMax}`);
+
+  const asked = verify(scene('open'), 40);
+  check('둘 다 배급 안이면 통과', asked.ok, asked.code);
+  check('통과 이유에 갈리는 값이 적힌다', /갈린다/.test(asked.reason), asked.reason);
+
+  const w = budgetWindow(asked);
+  check('창의 바닥이 그리기 값이다', w.min === 34, `${w.min}~${w.max}`);
+  check('창 안의 값은 둘 다 갈 수 있다',
+        [0, 0.5, 1].every((s) => {
+          const v = verify(scene('open'), pickBudget(w, s));
+          return v.ok && v.honestCost <= pickBudget(w, s);
+        }));
+
+  // 두 길의 값이 같으면 고르는 것이 성향이 아니라 그날의 기분이다
+  const flat = verify({
+    intent: 'open', start: { x: 3, y: 3 }, goal: { x: 3, y: 14 }, zMax: 8,
+    fixtures: [{ cells: [{ x: 15, y: 15 }], z: 1 }], note: '',
+  }, 60);
+  check('두 길이 비슷하면 물어볼 것이 없다', flat.code === 'NO_CHOICE',
+        `${flat.code} — 착시 ${flat.illusionCost} / 그리기 ${flat.honestCost}`);
+  check('차이를 벌리라고 한다', flat.fix.action === 'redesign', flat.fix.note);
+
+  // 그리기로 아예 못 가면 고를 것이 없다.
+  // 시작 칸의 사방을 막되 한쪽만 이음매로 열어 둔다.
+  const forced = verify({
+    intent: 'open', start: { x: 0, y: 0 }, goal: { x: 3, y: 12 }, zMax: 8,
+    fixtures: [
+      { cells: [{ x: 4, y: 3 }, { x: 5, y: 3 }, { x: 6, y: 3 }], z: 3 },
+      { cells: [{ x: 0, y: 1 }], z: 1 },
+    ],
+    note: '',
+  }, 200);
+  check('그리기로 못 가면 물어본 것이 아니다', forced.code === 'NO_CHOICE',
+        `${forced.code} — 착시 ${forced.illusionCost} / 그리기 ${forced.honestCost}`);
+  check('그 층은 착시로는 풀린다', forced.illusionCost !== null && forced.honestCost === null);
+}
+
+// ---------------------------------------------------------------------------
 // 11. 짚어 준 대로 고치면 그 실패는 다시 안 난다
 //
 // 판정이 이유만 대고 방향을 안 주면 재설계는 무작위 재추첨이 된다.

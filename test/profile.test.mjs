@@ -71,8 +71,7 @@ const PUSHER = stats({ inkSpent: 118, illusionSteps: 0, realSteps: 40, redraws: 
 
 {
   const first = briefFor(profileOf(stats(), {}), {});
-  check('읽을 것이 없으면 기본을 낸다', first.brief.intent === 'illusion',
-        first.note);
+  check('읽을 것이 없으면 물어본다', first.brief.intent === 'open', first.note);
 
   const seeker = briefFor(profileOf(SEEKER, { granted: 120, stages: 2 }), {});
   check('착시만 노리면 정렬이 불가능한 층', seeker.brief.intent === 'honest',
@@ -82,19 +81,20 @@ const PUSHER = stats({ inkSpent: 118, illusionSteps: 0, realSteps: 40, redraws: 
   check('다리로만 밀면 그리기로는 못 가는 층', pusher.brief.intent === 'illusion',
         pusher.note);
 
-  // 애매하면 하던 것을 유지한다.
+  // 애매하면 물어본다.
   //
   // 맞서는 층은 그 자체로 성향을 읽을 수 없다 — 착시 강제 층에서는 누구나
   // 이음매를 건너고, 정직 층에서는 상한이 0 이라 아무도 못 건넌다.
-  // 문턱을 하나만 두면 매 층 방향이 뒤집힌다.
+  // 문턱 사이를 "하던 것 유지" 로 두면 디렉터가 자기가 낸 층을 다시 읽게 된다.
+  // 둘 다 갈 수 있는 층에서 나온 선택만이 디렉터가 만들지 않은 정보다.
   const mid = profileOf(stats({ illusionSteps: 2, realSteps: 20 }), { stages: 2 });
   check('애매한 지표는 문턱 사이에 있다', mid.illusion > 0.3 && mid.illusion < 0.7,
         `${mid.illusion}`);
-  check('애매하면 정직을 유지', briefFor(mid, { previous: 'honest' }).brief.intent === 'honest');
-  check('애매하면 착시도 유지', briefFor(mid, { previous: 'illusion' }).brief.intent === 'illusion');
-  check('넘어가면 유지하던 것을 뒤집는다',
-        briefFor(profileOf(SEEKER, { stages: 2 }), { previous: 'illusion' })
-          .brief.intent === 'honest');
+  check('애매하면 물어본다', briefFor(mid, {}).brief.intent === 'open',
+        briefFor(mid, {}).note);
+  check('확실하면 물어보지 않고 맞선다',
+        briefFor(profileOf(SEEKER, { stages: 2 }), {}).brief.intent === 'honest'
+        && briefFor(profileOf(PUSHER, { stages: 2 }), {}).brief.intent === 'illusion');
 }
 
 // ---------------------------------------------------------------------------
@@ -160,30 +160,32 @@ const PUSHER = stats({ inkSpent: 118, illusionSteps: 0, realSteps: 40, redraws: 
 }
 
 // ---------------------------------------------------------------------------
-// 5. 진동하지 않는가 — 가상 플레이어로 여러 층을 돌린다
+// 5. 읽은 것이 정말 플레이어의 것인가 — 가상 플레이어로 여러 층을 돌린다
 //
-// 디렉터가 만든 층이 다음 판단의 입력이 된다. 착시 강제 층에서는 누구나
-// 이음매를 건너므로 지표가 강제로 채워지고, 정직 층에서는 반대다.
-// 문턱 하나로는 매 층 방향이 뒤집힌다.
+// 이 절이 6단계의 주장을 지킨다. 맞서는 층만 내면 디렉터가 만든 층이 다음
+// 판단의 입력이 되어, 4층째부터는 성향이 무엇이든 같은 순서가 나온다.
+// 읽었다고 한 것이 사실은 자기가 직전에 낸 층이다.
+//
+// 그래서 **선택 말고는 아무것도 다르지 않은 두 사람**을 돌린다.
+// 둘이 다른 층을 받으면 읽은 것이 그 사람의 것이다.
 // ---------------------------------------------------------------------------
-function playThrough(start, count, seed0, style = {}) {
-  const s = { ...start };
-  // 들고 오는 지표는 1층을 치른 결과다. 그 층의 배급도 같이 들고 와야
-  // 압박 비율이 맞는다 — 0 에서 시작하면 첫 판단이 압박을 0 으로 읽는다.
-  let granted = style.granted ?? 120;
-  let stages = start.stages ?? 0;
-  let previous = null;
+function playThrough(prefersIllusion, count, seed0, style = {}) {
+  const s = stats(style.start);
+  let granted = style.granted ?? 0;
+  let stages = style.stages ?? 0;
   const trail = [];
 
   for (let n = 0; n < count; n++) {
-    const r = directFor(s, { granted, stages }, seed0 + n, { previous });
+    const r = directFor(s, { granted, stages }, seed0 + n);
     if (!r.ok) break;
 
-    previous = r.intent;
     granted += r.inkMax;
 
-    // 최소 해법대로 푸는 플레이어를 가정한다
-    const p = verify(r.candidate, r.inkMax).illusion;
+    // 고를 수 있으면 성향대로 고르고, 아니면 갈 수 있는 쪽으로 간다
+    const v = verify(r.candidate, r.inkMax);
+    const canHonest = !!v.honest && v.honestCost <= r.inkMax;
+    const p = (prefersIllusion || !canHonest) ? v.illusion : v.honest;
+
     s.inkSpent += p.cost;
     for (let i = 1; i < p.path.length; i++) {
       if (isIllusion(p.path[i - 1], p.path[i])) s.illusionSteps++;
@@ -192,51 +194,54 @@ function playThrough(start, count, seed0, style = {}) {
     if (style.hesitant) s.redraws += Math.round(p.drawn.length * 0.4);
 
     stages++;
-    trail.push({ intent: r.intent, inkMax: r.inkMax, slack: r.slack });
+    trail.push({ intent: r.intent, inkMax: r.inkMax, slack: r.slack, chose: canHonest });
   }
 
   return { trail, stats: s };
 }
 
 {
-  const seekerRun = playThrough(
-    { ...SEEKER, stages: 1 }, 6, 30);
-  const pusherRun = playThrough(
-    { ...PUSHER, stages: 1 }, 6, 30);
+  const rides = playThrough(true, 10, 30);    // 고를 수 있으면 착시를 고르는 사람
+  const draws = playThrough(false, 10, 30);   // 고를 수 있으면 그려서 가는 사람
 
-  const flips = (t) => t.reduce((n, x, i) =>
-    n + (i > 0 && x.intent !== t[i - 1].intent ? 1 : 0), 0);
+  const kinds = (t) => t.map((x) => x.intent);
 
-  check('여섯 층을 다 낸다',
-        seekerRun.trail.length === 6 && pusherRun.trail.length === 6,
-        `착시파 ${seekerRun.trail.length} / 다리파 ${pusherRun.trail.length}`);
+  check('열 층을 다 낸다', rides.trail.length === 10 && draws.trail.length === 10,
+        `${rides.trail.length} / ${draws.trail.length}`);
 
-  check('매 층 방향이 뒤집히지 않는다',
-        flips(seekerRun.trail) <= 2 && flips(pusherRun.trail) <= 2,
-        `착시파 ${flips(seekerRun.trail)}회 / 다리파 ${flips(pusherRun.trail)}회`);
+  // 이것이 이 묶음의 핵심이다. 두 사람은 고르는 것 말고 다른 점이 없다.
+  check('선택만 다른 두 사람이 다른 층을 받는다',
+        JSON.stringify(kinds(rides.trail)) !== JSON.stringify(kinds(draws.trail)));
 
-  check('착시만 노리던 사람은 정직 층부터 받는다',
-        seekerRun.trail[0].intent === 'honest', seekerRun.trail[0].intent);
-  check('다리로만 밀던 사람은 착시 층부터 받는다',
-        pusherRun.trail[0].intent === 'illusion', pusherRun.trail[0].intent);
+  check('착시를 고르는 사람에게는 정렬을 없앤 층이 온다',
+        kinds(rides.trail).includes('honest') && !kinds(rides.trail).includes('illusion'),
+        kinds(rides.trail).join(' '));
+  check('그려서 가는 사람에게는 그리기를 막은 층이 온다',
+        kinds(draws.trail).includes('illusion') && !kinds(draws.trail).includes('honest'),
+        kinds(draws.trail).join(' '));
 
-  // 강제로 채워진 지표는 층이 쌓이며 희석된다. 그래서 방향이 언젠가는 돈다.
-  check('계속 같은 것만 내지는 않는다',
-        new Set(pusherRun.trail.map((t) => t.intent)).size === 2,
-        pusherRun.trail.map((t) => t.intent[0]).join(''));
+  check('둘 다 물어보는 층을 받는다',
+        kinds(rides.trail).includes('open') && kinds(draws.trail).includes('open'));
+  check('첫 층은 물어보는 층이다 — 아직 읽을 것이 없다',
+        rides.trail[0].intent === 'open' && draws.trail[0].intent === 'open');
 
-  // 망설임 대응은 압박이 이미 꽉 찬 사람에게는 확인할 수 없다. 조일 자리가
-  // 남아 있지 않기 때문이다. 배급을 절반쯤 쓰는 사람으로 잰다.
-  const MODERATE = stats({ inkSpent: 50, illusionSteps: 0, realSteps: 25 });
-  const jitteryRun = playThrough({ ...MODERATE, stages: 1 }, 5, 30, { hesitant: true });
-  const steadyRun = playThrough({ ...MODERATE, stages: 1 }, 5, 30);
+  // 물어보는 층에서는 둘 다 갈 수 있어야 한다. 못 고르면 물어본 것이 아니다.
+  const asked = rides.trail.filter((x) => x.intent === 'open');
+  check(`물어보는 층에서는 정말 고를 수 있다 (${asked.length}층)`,
+        asked.every((x) => x.chose));
+
+  // 망설임 대응은 압박이 이미 꽉 찬 사람에게는 확인할 수 없다.
+  // 조일 자리가 남아 있지 않기 때문이다.
+  const jittery = playThrough(false, 6, 30, { hesitant: true });
+  const steady = playThrough(false, 6, 30);
   const avg = (t) => t.reduce((a, x) => a + x.slack, 0) / t.length;
   check('망설이는 사람은 계속 조인 배급을 받는다',
-        avg(jitteryRun.trail) < avg(steadyRun.trail),
-        `망설임 ${avg(jitteryRun.trail).toFixed(2)} vs 안정 ${avg(steadyRun.trail).toFixed(2)}`);
+        avg(jittery.trail) < avg(steady.trail),
+        `망설임 ${avg(jittery.trail).toFixed(2)} vs 안정 ${avg(steady.trail).toFixed(2)}`);
 
-  console.log(`\n      착시파 : ${seekerRun.trail.map((t) => t.intent).join(' → ')}`);
-  console.log(`      다리파 : ${pusherRun.trail.map((t) => t.intent).join(' → ')}\n`);
+  const label = { illusion: '착시강제', honest: '정직강제', open: '물어봄' };
+  console.log(`\n      착시를 고르는 사람 : ${kinds(rides.trail).map((k) => label[k]).join(' ')}`);
+  console.log(`      그려서 가는 사람   : ${kinds(draws.trail).map((k) => label[k]).join(' ')}\n`);
 }
 
 // ---------------------------------------------------------------------------

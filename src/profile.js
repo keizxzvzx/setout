@@ -64,36 +64,38 @@ export function profileOf(stats, context = {}) {
 
 // --- 맞서는 규칙 -----------------------------------------------------------
 //
-// 방향을 뒤집는 문턱을 유지하는 문턱보다 멀리 둔다.
+// 확실할 때만 맞서고, 애매하면 물어본다.
 //
 // 맞서는 층은 그 자체로는 성향을 읽을 수 없다. 착시 강제 층에서는 누구나
 // 이음매를 건너고(강제니까), 정직 층에서는 상한이 0 이라 아무도 못 건넌다.
-// 디렉터가 만든 층이 다음 판단의 입력이 되는 구조라, 한 층 결과로 방향을
-// 뒤집으면 매 층 진동한다.
+// 디렉터가 만든 층이 다음 판단의 입력이 되는 셈이라, 맞서는 층만 내면
+// 4층째부터는 성향이 무엇이든 같은 순서가 나온다. 가상 플레이어로 12층을
+// 돌려 확인한 것이다 — 읽었다고 한 것이 사실은 자기가 직전에 낸 층이었다.
 //
-// 그래서 확실히 넘어갔을 때만 뒤집고 애매하면 하던 것을 유지한다.
-// 지표는 층이 쌓이며 저절로 희석되므로, 강제로 채워진 값도 몇 층 지나면
-// 제자리로 돌아온다.
+// 그래서 문턱 사이는 "하던 것을 유지" 가 아니라 **읽는 층**이다. 둘 다 갈 수
+// 있는데 착시가 싼 층을 내고, 싼 길을 골랐는지 비싼 길을 골랐는지를 본다.
+// 여기서 나온 선택만이 디렉터가 만들지 않은 정보다.
 const SWITCH_TO_HONEST = 0.7;
 const SWITCH_TO_ILLUSION = 0.3;
 
 export function briefFor(profile, opts = {}) {
-  const { zMax = Z_MAX, previous = null } = opts;
+  const { zMax = Z_MAX } = opts;
 
   if (!profile.stages) {
     return {
-      brief: { intent: 'illusion', zMax },
+      brief: { intent: 'open', zMax },
       slack: 0.5,
-      note: '아직 읽을 것이 없다. 이 게임의 기본을 낸다.',
+      note: '아직 읽을 것이 없다. 둘 다 갈 수 있는 층을 내고 무엇을 고르는지 본다.',
     };
   }
 
   // 착시만 노리는 사람 → 정렬이 불가능한 지형
   // 늘 다리로 밀어붙이는 사람 → 그리기로는 못 가는 지형
+  // 아직 모르겠는 사람       → 고르게 하고 본다
   let intent;
   if (profile.illusion >= SWITCH_TO_HONEST) intent = 'honest';
   else if (profile.illusion <= SWITCH_TO_ILLUSION) intent = 'illusion';
-  else intent = previous ?? 'illusion';
+  else intent = 'open';
 
   // 배급을 창의 어디에 놓을 것인가. 0 이 바닥(조임), 1 이 천장(여유).
   //
@@ -111,23 +113,22 @@ export function briefFor(profile, opts = {}) {
 
   const pct = (v) => Math.round(v * 100);
 
-  const why = intent === 'honest'
-    ? `층당 착시를 ${(profile.illusion * ILLUSION_PER_STAGE).toFixed(1)}번 건넜다. ` +
-      '맞출 정렬이 없는 층을 낸다.'
-    : `층당 착시를 ${(profile.illusion * ILLUSION_PER_STAGE).toFixed(1)}번밖에 안 건넜다. ` +
-      '그리기만으로는 못 가는 층을 낸다.';
+  const crossed = (profile.illusion * ILLUSION_PER_STAGE).toFixed(1);
+
+  const why = {
+    honest: `층당 착시를 ${crossed}번 건넜다. 맞출 정렬이 없는 층을 낸다.`,
+    illusion: `층당 착시를 ${crossed}번밖에 안 건넜다. 그리기만으로는 못 가는 층을 낸다.`,
+    open: `층당 착시가 ${crossed}번이라 어느 쪽인지 모르겠다. ` +
+          '둘 다 갈 수 있는 층을 내고 무엇을 고르는지 본다.',
+  }[intent];
 
   const how = squeeze > 0.5
     ? `배급의 ${pct(profile.pressure)}% 를 쓰고 망설임이 ${pct(profile.hesitation)}% 다. 여유를 줄인다.`
     : `배급의 ${pct(profile.pressure)}% 를 썼다. 여유는 남겨 둔다.`;
 
-  const held = intent === previous && profile.illusion > SWITCH_TO_ILLUSION
-    && profile.illusion < SWITCH_TO_HONEST
-    ? ' (애매해서 하던 것을 유지한다)' : '';
-
   return {
     brief: { intent, zMax },
     slack,
-    note: `${profile.stages}층째 — ${why}${held} ${how}`,
+    note: `${profile.stages}층째 — ${why} ${how}`,
   };
 }

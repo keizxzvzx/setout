@@ -269,10 +269,15 @@ export function design(brief = {}, rng = makeRng(1)) {
     if (!c) continue;
     if (!c.fixtures.every((f) => fixtureOk(f, c.zMax))) continue;
 
-    // 착시 층은 이음매가 정직하게 붙지 않는 것까지 지켜야 한다.
-    if (c.intent === 'illusion' && !c.fixtures.every((f) => seamOk(f, c.zMax))) continue;
+    // 이음매를 쓰는 층은 그것이 정직하게 붙지 않는 것까지 지켜야 한다.
+    // 착시를 강제하는 층과 고르게 하는 층 둘 다 여기 걸린다 — 어느 쪽이든
+    // "그리기만으로 가면 얼마인가" 가 정확해야 판정이 성립한다.
+    if (intent !== 'honest' && !c.fixtures.every((f) => seamOk(f, c.zMax))) continue;
 
-    return c;
+    // 지형은 같아도 무엇을 묻는 층인지는 지시가 정한다.
+    // illusionLayout 이 붙여 둔 이름을 그대로 두면 고르게 하려고 낸 층이
+    // 착시를 강제하는 층으로 판정된다.
+    return { ...c, intent };
   }
 
   return null;
@@ -328,6 +333,10 @@ export function candidateCells(candidate) {
 // 그것을 실제로 돌리는 것은 재설계 루프의 몫이다. 판정과 대응을 섞으면
 // 층이 안 나올 때 판정이 틀린 것인지 대응이 틀린 것인지 가릴 수 없다.
 // ---------------------------------------------------------------------------
+
+// 고르게 하는 층에서 두 길의 값 차이가 이보다 작으면 고를 이유가 없다.
+// 어느 쪽을 골라도 같으면 그 선택은 성향이 아니라 그날의 기분이다.
+export const CHOICE_GAP = 3;   // 칸
 
 // 그리기만으로 가는 값이 이보다 짧으면 층이라고 할 것이 없다.
 //
@@ -394,6 +403,37 @@ export function verify(candidate, inkMax, opts = {}) {
     return out('TOO_SHALLOW',
       `그냥 그려도 ${floorCells}칸이면 닿는다. 층이라고 할 것이 없다.`,
       redesignFix(`목표를 밀어낸다 — 그리기로 최소 ${minCells}칸.`));
+  }
+
+  // --- 고르게 하는 층 ---
+  //
+  // 맞서기만 해서는 성향을 읽을 수 없다. 착시를 강제하면 누구나 이음매를
+  // 건너고, 정렬을 없애면 아무도 못 건넌다. 둘 다 갈 수 있는데 착시가 싼 층을
+  // 내야 무엇을 고르는지가 그 사람의 것이 된다.
+  if (candidate.intent === 'open') {
+    if (h === null) {
+      return out('NO_CHOICE',
+        '그리기만으로 가는 길이 없다. 고를 것이 없으면 읽을 것도 없다.',
+        redesignFix('길을 막고 있는 구조물을 치운다.'));
+    }
+
+    const gap = (h - i) / INK_COST;
+
+    if (gap < CHOICE_GAP) {
+      return out('NO_CHOICE',
+        `착시 ${i} 와 그리기 ${h} 의 차이가 ${gap}칸뿐이다. ` +
+        '어느 쪽을 골라도 비슷하면 그 선택은 성향이 아니다.',
+        redesignFix(`이음매를 목표에서 더 먼 자리로 옮겨 차이를 ${CHOICE_GAP}칸 이상으로 벌린다.`));
+    }
+
+    if (h > inkMax) {
+      return out('OVER_BUDGET',
+        `비싼 쪽(그리기 ${h})이 배급 ${inkMax} 밖이다. 고를 수 없으면 물어본 것이 아니다.`,
+        budgetFix(h, `배급을 ${h} 로 올려 둘 다 갈 수 있게 한다.`));
+    }
+
+    return out('OK',
+      `착시로 ${i}, 그리기로 ${h}. 배급 ${inkMax} 안에서 둘 다 갈 수 있고 ${gap}칸이 갈린다.`);
   }
 
   if (candidate.intent === 'honest') {
@@ -466,6 +506,14 @@ export function verify(candidate, inkMax, opts = {}) {
 const snap = (x) => Math.max(INK_COST, Math.round(x / INK_COST) * INK_COST);
 
 export function budgetWindow(v) {
+  // 고르게 하는 층은 비싼 쪽까지 닿아야 선택이 성립한다. 바닥이 딱 그리기
+  // 값이면 정직한 길을 고르는 순간 여유가 0 이라, 고를 수는 있어도 고르고
+  // 싶지는 않은 층이 된다. 그래서 위로만 연다.
+  if (v.intent === 'open') {
+    const min = v.honestCost;
+    return { min, max: min + snap(min * 0.3) };
+  }
+
   if (v.intent === 'honest') {
     // 정직 층에는 위쪽 제약이 없다. 그래도 무한정 주면 퍼즐이 아니게 되므로
     // 실험할 만큼만 얹는다.
@@ -617,10 +665,10 @@ export function direct(brief = {}, seed = 1, opts = {}) {
 // 6단계의 한 문장이 이 함수다. 지금까지는 무엇을 요구하는 층인지 부르는 쪽이
 // 적어 냈지만, 여기서부터는 플레이어가 정한다.
 export function directFor(stats, context = {}, seed = 1, opts = {}) {
-  const { zMax, previous = null, ...rest } = opts;
+  const { zMax, ...rest } = opts;
 
   const profile = profileOf(stats, context);
-  const read = briefFor(profile, { zMax, previous });
+  const read = briefFor(profile, { zMax });
   const result = direct(read.brief, seed, { ...rest, slack: read.slack });
 
   return {
