@@ -494,5 +494,115 @@ const B_draw = (cells) => {
 }
 
 // ---------------------------------------------------------------------------
+// 13. 층을 넘길 때 손에 든 것을 놓는다
+//
+// pointerdown 은 flip.on 으로 막고 있었지만, **넘기기 직전에 이미 시작된**
+// 제스처는 손이 아직 붙어 있어 move / up 으로 계속 들어온다. 그대로 두면
+// 이전 층에 대고 긋던 획이 새 층에 확정된다 — 실측하니 새 층 배급 22 중 8을
+// 먹었고, 지우개 쪽은 새 층의 고정 구조물을 지웠다.
+//
+// 도착하고 0.8초 뒤에 넘어가므로 손이 붙어 있는 것은 드문 일이 아니다.
+// ---------------------------------------------------------------------------
+{
+  globalThis.window = { addEventListener: () => {} };
+  const { pointer, attachPointer, abortGesture, resyncPointer } =
+    await import('../src/input.js');
+
+  const L = {};
+  attachPointer({
+    addEventListener: (t, fn) => { L[t] = fn; },
+    getBoundingClientRect: () => ({ left: 0, top: 0 }),
+    setPointerCapture: () => {},
+  });
+
+  // 격자 칸의 화면 좌표. 바닥 평면 기준이면 뜬 판도 pickAt 이 알아서 찾는다.
+  const at = (gx, gy) => {
+    const p = worldToScreen(gx + 0.5, gy + 0.5, 0);
+    return { clientX: p.x, clientY: p.y, button: 0, pointerId: 1 };
+  };
+  const runFlip = () => { let n = 0; while (flip.on && n < 600) { updateFlip(1 / 60, { log: false }); n++; } };
+
+  // --- 긋던 획 ---
+  beginRun();
+  L.pointerdown(at(8, 8));
+  L.pointermove(at(9, 8));
+  check('획을 긋는 중이다', pointer.mode === 'draw' && board.stroke.size === 2,
+        `${pointer.mode} / ${board.stroke.size}`);
+
+  abortGesture();                     // main.js 가 beginFlip 직전에 하는 일
+  check('제스처를 놓았다', pointer.mode === null);
+  check('긋던 획은 버린다 — 어느 층 것인지 정해지지 않았다', board.stroke.size === 0);
+
+  beginFlip();
+  runFlip();
+
+  const cellsAfter = Board.cellList().length;
+  const inkAfter = board.ink;
+
+  // 손은 아직 붙어 있다
+  L.pointermove(at(10, 8));
+  L.pointermove(at(11, 8));
+  L.pointerup(at(11, 8));
+
+  check('이전 층에서 시작한 획이 새 층에 안 그어진다',
+        Board.cellList().length === cellsAfter && board.ink === inkAfter,
+        `칸 ${Board.cellList().length}/${cellsAfter}, 잉크 ${board.ink}/${inkAfter}`);
+
+  // --- 지우던 손 ---
+  buildStage({
+    start: { x: 3, y: 3 }, goal: { x: 12, y: 10 }, inkMax: 40, zMax: 8,
+    fixtures: [{ cells: [{ x: 8, y: 8 }, { x: 9, y: 8 }, { x: 10, y: 8 }], z: 3 }],
+  });
+  L.pointerdown({ ...at(15, 15), button: 2 });
+  check('지우는 중이다', pointer.mode === 'erase');
+
+  abortGesture();
+  beginFlip();
+  runFlip();
+
+  const fixCells = Board.cellList().length;
+  L.pointermove({ ...at(5, 5), button: 2 });
+  L.pointermove({ ...at(6, 5), button: 2 });
+  L.pointerup({ ...at(6, 5), button: 2 });
+  check('지우던 손이 새 층을 갉지 않는다', Board.cellList().length === fixCells,
+        `${Board.cellList().length}/${fixCells}`);
+
+  // --- 사라진 판의 하이라이트 ---
+  //
+  // pointer.hit 은 판 칸을 통째로 들고 있어서, 층이 바뀌면 이미 없어진 판을
+  // 가리킨 채 남는다. 하이라이트가 그것을 **옛 z 로** 그리므로 새 층의 허공에
+  // 앰버 마름모가 뜨고, 목표 표식과 구분되지 않는다.
+  buildStage({
+    start: { x: 3, y: 3 }, goal: { x: 12, y: 10 }, inkMax: 40, zMax: 8,
+    fixtures: [{ cells: [{ x: 9, y: 9 }], z: 5 }],      // 화면 자리 (4,4)
+  });
+  L.pointermove(at(4, 4));
+  check('올려 둔 판을 집었다', !!pointer.hit && pointer.hit.z === 5,
+        pointer.hit ? `z=${pointer.hit.z}` : 'null');
+
+  const ghost = pointer.hit.plate;
+  beginFlip();
+  runFlip();
+  resyncPointer();                    // main.js 가 넘기기가 끝날 때 하는 일
+
+  check('없어진 판을 계속 가리키지 않는다',
+        !pointer.hit || board.plates.includes(pointer.hit.plate),
+        pointer.hit ? `z=${pointer.hit.z}` : 'null');
+  check('그 판은 실제로 없어졌다', !board.plates.includes(ghost));
+  check('커서가 가리키던 자리는 그대로다', pointer.at.x === 4 && pointer.at.y === 4,
+        `${pointer.at.x},${pointer.at.y}`);
+
+  // 새 층에 그 자리에 판이 있으면 다시 집어야 한다 — 그냥 비우기만 하면
+  // 커서를 흔들기 전까지 하이라이트가 없다.
+  buildStage({
+    start: { x: 3, y: 3 }, goal: { x: 12, y: 10 }, inkMax: 40, zMax: 8,
+    fixtures: [{ cells: [{ x: 7, y: 7 }], z: 3 }],      // 역시 화면 자리 (4,4)
+  });
+  resyncPointer();
+  check('새 층에 판이 있으면 다시 집는다', !!pointer.hit && pointer.hit.z === 3,
+        pointer.hit ? `z=${pointer.hit.z}` : 'null');
+}
+
+// ---------------------------------------------------------------------------
 console.log(fail ? `\n${fail}건 실패` : '\n전부 통과');
 process.exit(fail ? 1 : 0);

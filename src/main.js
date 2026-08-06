@@ -8,7 +8,7 @@ import {
   clear, drawFloor, drawFootprints, drawGoal, drawPlates,
   drawStroke, drawHoverCell, drawInkGauge,
 } from './render.js';
-import { pointer, attachPointer } from './input.js';
+import { pointer, attachPointer, abortGesture, resyncPointer } from './input.js';
 
 const canvas = document.getElementById('stage');
 const ctx = canvas.getContext('2d');
@@ -50,10 +50,15 @@ function frame(now) {
   updateActor(dt);
 
   // 도착하면 잠깐 두었다가 도면을 넘긴다. 디렉터는 넘기는 한복판에서 불린다.
+  //
+  // 넘기기 전에 하던 제스처를 놓는다. 도착 직후 손을 떼지 않고 있는 일은
+  // 흔한데(CLEAR_PAUSE 가 0.8초다), 그대로 두면 이전 층에 대고 긋던 획이
+  // 새 층에 확정된다. abortGesture 참조.
   if (board.cleared && !flip.on) {
     clearedFor += dt;
     if (clearedFor >= CLEAR_PAUSE) {
       clearedFor = 0;
+      abortGesture();
       beginFlip();
     }
   }
@@ -67,10 +72,15 @@ function frame(now) {
 
   if (stuckFor >= STUCK_PAUSE) {
     stuckFor = 0;
+    abortGesture();
     beginFlip({ redeal: true });
   }
 
+  // 넘기기가 끝나는 순간 커서 아래를 다시 집는다. 손은 안 움직였으므로
+  // 가리키는 자리는 맞지만, 그 자리에 있던 판은 이미 없어졌다.
+  const wasFlipping = flip.on;
   const shift = updateFlip(dt);
+  if (wasFlipping && !flip.on) resyncPointer();
 
   clear(ctx, viewW, viewH);
 

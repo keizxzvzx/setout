@@ -13,14 +13,49 @@ import { walkTo } from './actor.js';
 import { flip } from './session.js';
 
 // cell  : 커서가 가리키는 바닥칸. 부지 밖이거나 창을 벗어나면 null
+// at    : 커서가 가리키는 바닥칸 — 부지 밖도 그대로. 판을 다시 집을 때 쓴다
 // hit   : 커서 아래에 실제로 보이는 판 칸. 없으면 null
-// mode  : null | 'draw' | 'erase'
+// mode  : null | 'draw' | 'erase' | 'walk'
 // button: 그 동작을 시작한 마우스 버튼
 //
-// 둘을 따로 두는 이유는 판이 뜨면 서로 다른 칸을 가리키게 되기 때문이다.
-// 그리기는 바닥에서 일어나므로 cell 을 보고, 지우기·휠·하이라이트는
+// cell 과 hit 을 따로 두는 이유는 판이 뜨면 서로 다른 칸을 가리키게 되기
+// 때문이다. 그리기는 바닥에서 일어나므로 cell 을 보고, 지우기·휠·하이라이트는
 // 눈에 보이는 것을 대상으로 하므로 hit 을 본다.
-export const pointer = { cell: null, hit: null, mode: null, button: -1 };
+export const pointer = { cell: null, at: null, hit: null, mode: null, button: -1 };
+
+// 휠 제스처가 붙잡고 있는 판을 놓는 것. attachPointer 가 채운다.
+let releaseHeld = () => {};
+
+// 하던 제스처를 놓는다. 층을 넘기기 직전에 부른다.
+//
+// pointerdown 은 flip.on 으로 막고 있지만, **넘기기 직전에 이미 시작된**
+// 제스처는 손이 아직 붙어 있어 move / up 으로 계속 들어온다. 그대로 두면
+// 이전 층에 대고 긋던 획이 새 층에 확정된다. 실측하니 새 층 배급 22 중 8을
+// 먹었고, 지우개 쪽은 새 층의 고정 구조물을 지웠다.
+//
+// 긋던 획은 버린다. 어느 층에 그은 것인지가 정해지지 않은 획이라
+// 확정할 근거가 없다. Esc 와 같은 처리다.
+export function abortGesture() {
+  if (pointer.mode === 'draw') cancelStroke();
+  else if (pointer.mode === 'erase') commitErase();
+
+  pointer.mode = null;
+  pointer.button = -1;
+  releaseHeld();
+}
+
+// 커서 아래에 무엇이 있는지 다시 집는다. 층이 바뀐 뒤에 부른다.
+//
+// pointer.hit 은 판 칸을 통째로 들고 있어서, 층이 바뀌면 **이미 없어진 판**을
+// 가리킨 채로 남는다. 하이라이트가 그것을 옛 z 로 그리므로 새 층의 허공에
+// 앰버 마름모가 뜨고, 목표 표식과 구분되지 않는다.
+//
+// 커서 자체는 그대로 둔다 — 손은 움직이지 않았으니 가리키는 자리는 맞다.
+// 틀린 것은 그 자리에 무엇이 있었는가뿐이다.
+export function resyncPointer() {
+  releaseHeld();
+  pointer.hit = pointer.at ? pickAt(pointer.at.x, pointer.at.y) : null;
+}
 
 export function attachPointer(canvas) {
   // 캔버스가 창을 꽉 채우더라도 좌표는 캔버스 기준으로 잰다.
@@ -50,6 +85,10 @@ export function attachPointer(canvas) {
   let wheelHit = null;
   let wheelAccum = 0;
 
+  // 붙잡고 있던 판을 놓는 것만 모듈 밖으로 낸다. abortGesture / resyncPointer
+  // 가 부른다 — 층이 바뀌면 그 판도 이미 없어진 판이다.
+  releaseHeld = () => { wheelHit = null; wheelAccum = 0; };
+
   // 우클릭이 지우개이므로 브라우저 기본 메뉴를 막는다.
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -70,6 +109,7 @@ export function attachPointer(canvas) {
 
     const pc = toPlateCell(e);
     pointer.cell = toCell(e);
+    pointer.at = pc;
     pointer.hit = pickAt(pc.x, pc.y);
     pointer.button = e.button;
 
@@ -101,7 +141,12 @@ export function attachPointer(canvas) {
 
     const pc = toPlateCell(e);
     pointer.cell = toCell(e);
+    pointer.at = pc;
     pointer.hit = pickAt(pc.x, pc.y);
+
+    // 넘기는 중에는 하던 것을 이어 가지 않는다. abortGesture 가 이미 놓았지만,
+    // 층이 갈리기 전에 시작된 제스처가 여기로 되돌아오는 길을 막아 둔다.
+    if (flip.on) return;
 
     if (pointer.mode === 'draw') extendStroke(pointer.cell);
     else if (pointer.mode === 'erase') extendErase(pc);
@@ -124,6 +169,7 @@ export function attachPointer(canvas) {
   canvas.addEventListener('pointerleave', () => {
     if (pointer.mode) return;
     pointer.cell = null;
+    pointer.at = null;
     pointer.hit = null;
     wheelHit = null;
   });
