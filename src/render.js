@@ -78,9 +78,16 @@ function polygon(ctx, pts) {
 // 마름모 꼭짓점은 위 → 오른쪽 → 아래 → 왼쪽 순.
 // 화면에서 보이는 옆면은 아래쪽 두 변뿐이라 두 장만 그린다.
 // 뒤쪽 면은 어차피 자기 윗면에 가려진다.
-function drawPlateSides(ctx, x, y, z) {
+// 미리 깔린 판은 색이 다르다. 지울 수 없다는 것을 문구 없이 알리는 유일한
+// 표시다 — 지우개를 문질러 아무 일도 안 일어나는 것으로 배우게 두면
+// 그건 규칙이 아니라 고장으로 읽힌다. config 의 fixed* 참조.
+const skin = (fixed) => (fixed
+  ? { top: COLOR.fixedTop, right: COLOR.fixedRight, left: COLOR.fixedLeft }
+  : { top: COLOR.plateTop, right: COLOR.plateRight, left: COLOR.plateLeft });
+
+function drawPlateSides(ctx, x, y, z, fixed) {
   const t = PLATE_T * view.scale;
-  const c = { right: COLOR.plateRight, left: COLOR.plateLeft };
+  const c = skin(fixed);
   const base = tileDiamond(x, y, z);
   const top = base.map((p) => ({ x: p.x, y: p.y - t }));
 
@@ -94,9 +101,9 @@ function drawPlateSides(ctx, x, y, z) {
 }
 
 // 걷는 면. 두께만큼 올라가 있다.
-function drawPlateTop(ctx, x, y, z) {
+function drawPlateTop(ctx, x, y, z, fixed) {
   const t = PLATE_T * view.scale;
-  ctx.fillStyle = COLOR.plateTop;
+  ctx.fillStyle = skin(fixed).top;
   polygon(ctx, tileDiamond(x, y, z).map((p) => ({ x: p.x, y: p.y - t })));
   ctx.fill();
 }
@@ -134,10 +141,10 @@ export function drawPlates(ctx) {
   // 두 벌로 나누면 윗면끼리는 서로 파고들 일이 없고(마름모는 정확히 맞물린다)
   // 옆면은 앞칸 윗면이 있으면 덮이고 없으면 판의 가장자리로 남는다.
   // "이어져 보인다면 이어진 것이다" 를 화면 쪽에서 지키는 것이 이 두 줄이다.
-  for (const c of cells) drawPlateSides(ctx, c.x, c.y, c.z);
+  for (const c of cells) drawPlateSides(ctx, c.x, c.y, c.z, c.fixed);
 
   for (const c of cells) {
-    drawPlateTop(ctx, c.x, c.y, c.z);
+    drawPlateTop(ctx, c.x, c.y, c.z, c.fixed);
     if (actorAt && c.x === actorAt.x && c.y === actorAt.y) drawActor(ctx);
   }
 
@@ -161,13 +168,16 @@ export function drawPlates(ctx) {
 // 점선이라 실선인 격자와 구분되면서 같은 계열에 머문다.
 export function drawFootprints(ctx) {
   ctx.save();
-  ctx.strokeStyle = COLOR.plateTop;
   ctx.globalAlpha = 0.55;
   ctx.lineWidth = 1;
   ctx.setLineDash([3, 3]);
 
   for (const p of board.plates) {
     if (p.z === 0) continue;
+
+    // 발자국도 그 판의 색을 따른다. 미리 깔린 판이 남긴 구멍과 내가 올린 판이
+    // 남긴 구멍은 둘 다 못 그리는 자리지만, 무엇이 남긴 것인지는 보여야 한다.
+    ctx.strokeStyle = p.fixed ? COLOR.fixedTop : COLOR.plateTop;
 
     for (const c of p.cells) {
       polygon(ctx, tileDiamond(c.x, c.y));

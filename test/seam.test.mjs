@@ -22,6 +22,7 @@ import {
   PLATE_T, COLOR, GRID_W, GRID_H, Z_MAX, ACTOR_H, MOVE_TIME,
   TILE_W as C_TILE_W, TILE_H as C_TILE_H,
 } from '../src/config.js';
+import * as Board from '../src/board.js';
 import { board, key, addPlate, resetBoard } from '../src/board.js';
 import { stage, setStage } from '../src/stage.js';
 import { fitView, worldToScreen, view } from '../src/iso.js';
@@ -386,6 +387,88 @@ function lay(cells) {
     { x: 8, y: 8 }, { x: 8, y: 11 });
 
   board.actor = null;
+}
+
+// ---------------------------------------------------------------------------
+// 7. 미리 깔린 판은 색으로 갈린다
+//
+// 지울 수 없다는 것을 알릴 방법이 이것뿐이다. 문구가 없으므로 지우개를
+// 문질러 아무 일도 안 일어나는 것으로 배우게 두면 규칙이 아니라 고장으로
+// 읽힌다. 5단계에서 "게임 안에 아무 표시도 하지 않는다" 로 정한 것은
+// **성향 지표**이지 규칙이 아니다 — 규칙은 화면에서 읽혀야 한다.
+// ---------------------------------------------------------------------------
+{
+  setStage({ zMax: Z_MAX, inkMax: 999, refund: 1,
+             start: { x: 4, y: 4 }, goal: { x: 15, y: 15 }, fixtures: [] });
+  resetBoard();
+  board.actor = null;
+  addPlate([{ x: 4, y: 4 }], 0, { fixed: true });     // 미리 깔린 판
+  addPlate([{ x: 9, y: 9 }], 0);                      // 내가 그은 판
+  addPlate([{ x: 14, y: 12 }], 3, { fixed: true });   // 올려 둔 고정 구조물
+
+  // 겹치는 화면 자리가 없어야 한다. 겹침을 시험하려는 배치가 아니므로 겹치면
+  // 그건 시나리오의 실수다 — 4·5단계에서 두 번 다 코드가 아니라 배치가 틀렸다.
+  {
+    const seen = new Set();
+    let clash = 0;
+    for (const c of Board.cellList()) {
+      const s = `${c.x - c.z},${c.y - c.z}`;
+      if (seen.has(s)) clash++;
+      seen.add(s);
+    }
+    check('배치에 겹치는 화면 자리가 없다', clash === 0, `${clash}건`);
+  }
+
+  const ctx = painter();
+  drawPlates(ctx);
+
+  const at = (x, y, z) => {
+    const c = topCenter({ x, y, z });
+    return ctx.colorAt(c.x, c.y);
+  };
+
+  check('내가 그은 판은 강철 윗면', at(9, 9, 0) === COLOR.plateTop, `${at(9, 9, 0)}`);
+  check('미리 깔린 판은 다른 윗면', at(4, 4, 0) === COLOR.fixedTop, `${at(4, 4, 0)}`);
+  check('올려 둔 구조물도 같은 색', at(14, 12, 3) === COLOR.fixedTop, `${at(14, 12, 3)}`);
+  check('두 색이 실제로 다르다', COLOR.fixedTop !== COLOR.plateTop);
+
+  // 옆면도 같이 갈려야 한다. 윗면만 바꾸면 두께에서 다시 붙어 보인다.
+  const t = T();
+  const s = view.scale;
+  const side = (x, y, z, dx) => {
+    const c = topCenter({ x, y, z });
+    return ctx.colorAt(c.x + dx * (C_TILE_W / 4) * s, c.y + (C_TILE_H / 4) * s + t / 2);
+  };
+  check('미리 깔린 판은 옆면도 다르다',
+        side(4, 4, 0, -1) === COLOR.fixedLeft && side(4, 4, 0, 1) === COLOR.fixedRight,
+        `${side(4, 4, 0, -1)} / ${side(4, 4, 0, 1)}`);
+  check('내가 그은 판의 옆면은 그대로',
+        side(9, 9, 0, -1) === COLOR.plateLeft && side(9, 9, 0, 1) === COLOR.plateRight,
+        `${side(9, 9, 0, -1)} / ${side(9, 9, 0, 1)}`);
+
+  // 갈라 놓은 색이 다른 뜻을 뺏으면 안 된다. 앰버는 자원(잉크·목표)이고
+  // 코발트는 내 말이다 — 4단계에서 캐릭터 색을 고를 때 세운 규율이다.
+  check('앰버도 코발트도 쓰지 않는다',
+        COLOR.fixedTop !== COLOR.amber && COLOR.fixedTop !== COLOR.actor
+        && COLOR.fixedRight !== COLOR.actor && COLOR.fixedLeft !== COLOR.actor);
+
+  // 이음매 규칙은 색과 무관해야 한다. 미리 깔린 판과 내가 그은 판이 붙는
+  // 자리가 이 게임의 대부분이므로 여기서 단이 지면 1번이 무의미해진다.
+  resetBoard();
+  board.actor = null;
+  addPlate([{ x: 5, y: 6 }], 0);                                   // 내가 그은 판
+  addPlate([{ x: 10, y: 10 }], 5, { fixed: true });                // 화면상 한 칸 옆
+  const mixed = painter();
+  drawPlates(mixed);
+  const a = { x: 5, y: 6, z: 0 };
+  const b = { x: 10, y: 10, z: 5 };
+  check('색이 갈린 두 판도 화면상 한 칸 옆', isAdjacent(a, b));
+
+  const colors = seamColors(mixed, a, b);
+  const bothSides = [COLOR.plateLeft, COLOR.plateRight, COLOR.fixedLeft, COLOR.fixedRight];
+  check('그 이음매에도 단이 없다',
+        !colors.some((c) => bothSides.includes(c) || c === null),
+        [...new Set(colors)].join(' '));
 }
 
 console.log(fail ? `\n  ${fail}건 실패\n` : '\n전부 통과\n');
