@@ -3,8 +3,9 @@
 # SETOUT_ 접두사가 붙은 파일은 개인 메모로 취급해 저장소에 올리지 않는다.
 SETOUT_*
 
-# IDE / OS
+# IDE / OS / 에이전트 도구 설정
 .idea/
 .vscode/
+.claude/
 .DS_Store
 Thumbs.db
