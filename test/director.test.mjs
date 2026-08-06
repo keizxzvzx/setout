@@ -12,7 +12,7 @@ import { screenCell, skey, isIllusion, usesIllusion } from '../src/path.js';
 import { minInk } from '../src/solver.js';
 import {
   makeRng, design, fixtureOk, seamOk, toStageSpec, candidateCells,
-  verify, MIN_CELLS, direct, budgetWindow, pickBudget, formatLog,
+  verify, MIN_CELLS, WASTE_MARGIN, direct, budgetWindow, pickBudget, formatLog,
 } from '../src/director.js';
 import { makeStage } from '../src/stage.js';
 
@@ -309,8 +309,11 @@ const scene = (intent) => ({
 
   const poor = verify(scene('illusion'), 10);
   check('배급이 모자라면 아예 못 푼다', poor.code === 'OVER_BUDGET', poor.code);
-  check('얼마가 필요한지 짚어 준다',
-        poor.fix.action === 'budget' && poor.fix.inkMax === 22, `→ ${poor.fix.inkMax}`);
+  // 최소 해법 22 에 헛디딜 여유 4 를 얹은 값이다. 딱 22 만 주면 잘못된 다리를
+  // 한 번 걸어 보는 것만으로 층을 못 끝낸다 — 밟은 칸은 환급이 0 이다.
+  check('최소 해법에 여유를 얹어 짚어 준다',
+        poor.fix.action === 'budget' && poor.fix.inkMax === 22 + WASTE_MARGIN * 2,
+        `→ ${poor.fix.inkMax}`);
 
   // 같은 지형을 정직 의도로 내면 정반대 판정이 나온다
   const forced = verify(scene('honest'), 25);
@@ -350,7 +353,7 @@ const scene = (intent) => ({
   const useless = verify({
     intent: 'illusion', start: { x: 3, y: 3 }, goal: { x: 3, y: 14 }, zMax: 8,
     fixtures: [{ cells: [{ x: 15, y: 15 }], z: 1 }], note: '',
-  }, 24);
+  }, 30);
   check('두 값이 같으면 조일 자리가 없다', useless.code === 'NO_BUDGET_WINDOW',
         `${useless.code} — 착시 ${useless.illusionCost} / 그리기 ${useless.honestCost}`);
   check('지형을 다시 짜라고 한다', useless.fix.action === 'redesign');
@@ -366,15 +369,17 @@ const scene = (intent) => ({
 {
   const tight = verify(scene('open'), 30);
   check('비싼 쪽이 배급 밖이면 고를 수 없다', tight.code === 'OVER_BUDGET', tight.code);
-  check('비싼 쪽까지 닿게 올리라고 한다',
-        tight.fix.action === 'budget' && tight.fix.inkMax === 34, `→ ${tight.fix.inkMax}`);
+  check('비싼 쪽에 여유까지 얹어 올리라고 한다',
+        tight.fix.action === 'budget' && tight.fix.inkMax === 34 + WASTE_MARGIN * 2,
+        `→ ${tight.fix.inkMax}`);
 
   const asked = verify(scene('open'), 40);
   check('둘 다 배급 안이면 통과', asked.ok, asked.code);
   check('통과 이유에 갈리는 값이 적힌다', /갈린다/.test(asked.reason), asked.reason);
 
   const w = budgetWindow(asked);
-  check('창의 바닥이 그리기 값이다', w.min === 34, `${w.min}~${w.max}`);
+  check('창의 바닥은 그리기 값에 여유를 얹은 값이다', w.min === 34 + WASTE_MARGIN * 2,
+        `${w.min}~${w.max}`);
   check('창 안의 값은 둘 다 갈 수 있다',
         [0, 0.5, 1].every((s) => {
           const v = verify(scene('open'), pickBudget(w, s));

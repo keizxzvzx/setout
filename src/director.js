@@ -334,6 +334,20 @@ export function candidateCells(candidate) {
 // 층이 안 나올 때 판정이 틀린 것인지 대응이 틀린 것인지 가릴 수 없다.
 // ---------------------------------------------------------------------------
 
+// 최소 해법에 얹어 주는 여유 (칸).
+//
+// 배급을 최소 해법에 딱 맞추면 한 칸도 헛디딜 수 없다. 그런데 헛디딘 다리를
+// 걸어 본 순간 그 잉크는 영영 안 돌아온다 — 밟은 칸은 환급이 0 이기 때문이다
+// (2·4단계에서 징검다리를 막으려고 그렇게 정했다).
+//
+// 1층에서는 배급이 120(60칸)이라 드러나지 않았다. 디렉터 층은 16~30 이라
+// 실측하니 실제 여유가 중앙값 2칸, 최소 0칸이었다. 잘못된 다리를 한 번
+// 걸어 보면 층을 못 끝내고, 왜 막혔는지 알 방법도 없다.
+//
+// 2칸을 얹으면 200층 중 182층이 살아남고 나머지는 루프가 다시 뽑는다.
+// 착시를 강제하는 성질은 그대로다 — 여유를 얹고도 그리기 값보다 낮으면 된다.
+export const WASTE_MARGIN = 2;   // 칸
+
 // 고르게 하는 층에서 두 길의 값 차이가 이보다 작으면 고를 이유가 없다.
 // 어느 쪽을 골라도 같으면 그 선택은 성향이 아니라 그날의 기분이다.
 export const CHOICE_GAP = 3;   // 칸
@@ -350,7 +364,7 @@ const budgetFix = (inkMax, note) => ({ action: 'budget', inkMax, note });
 const redesignFix = (note) => ({ action: 'redesign', note });
 
 export function verify(candidate, inkMax, opts = {}) {
-  const { minCells = MIN_CELLS } = opts;
+  const { minCells = MIN_CELLS, margin = WASTE_MARGIN * INK_COST } = opts;
 
   const cells = candidateCells(candidate);
   const from = { x: candidate.start.x, y: candidate.start.y, z: 0 };
@@ -426,10 +440,11 @@ export function verify(candidate, inkMax, opts = {}) {
         redesignFix(`이음매를 목표에서 더 먼 자리로 옮겨 차이를 ${CHOICE_GAP}칸 이상으로 벌린다.`));
     }
 
-    if (h > inkMax) {
+    if (h + margin > inkMax) {
       return out('OVER_BUDGET',
-        `비싼 쪽(그리기 ${h})이 배급 ${inkMax} 밖이다. 고를 수 없으면 물어본 것이 아니다.`,
-        budgetFix(h, `배급을 ${h} 로 올려 둘 다 갈 수 있게 한다.`));
+        `비싼 쪽(그리기 ${h})에 여유 ${margin} 을 얹으면 배급 ${inkMax} 밖이다. ` +
+        '고를 수 없으면 물어본 것이 아니다.',
+        budgetFix(h + margin, `배급을 ${h + margin} 로 올려 둘 다 갈 수 있게 한다.`));
     }
 
     return out('OK',
@@ -450,10 +465,10 @@ export function verify(candidate, inkMax, opts = {}) {
         redesignFix('정렬이 성립하지 않도록 상한을 조이거나 구조물을 눕힌다.'));
     }
 
-    if (h > inkMax) {
+    if (h + margin > inkMax) {
       return out('OVER_BUDGET',
-        `정직한 최소 해법이 ${h} 인데 배급이 ${inkMax} 다.`,
-        budgetFix(h, `배급을 ${h} 로 올린다.`));
+        `정직한 최소 해법 ${h} 에 여유 ${margin} 을 얹으면 배급 ${inkMax} 를 넘는다.`,
+        budgetFix(h + margin, `배급을 ${h + margin} 로 올린다.`));
     }
 
     return out('OK', `그리기만으로 ${h} 에 풀린다. 맞출 정렬은 없다.`);
@@ -461,10 +476,11 @@ export function verify(candidate, inkMax, opts = {}) {
 
   // --- 착시 의도 ---
 
-  if (i > inkMax) {
+  if (i + margin > inkMax) {
     return out('OVER_BUDGET',
-      `최소 해법이 ${i} 인데 배급이 ${inkMax} 다. 아예 못 푼다.`,
-      budgetFix(i, `배급을 ${i} 로 올린다.`));
+      `최소 해법 ${i} 에 여유 ${margin} 을 얹으면 배급 ${inkMax} 를 넘는다. ` +
+      '딱 맞추면 한 칸도 헛디딜 수 없다.',
+      budgetFix(i + margin, `배급을 ${i + margin} 로 올린다.`));
   }
 
   // 정직한 길이 없으면 착시가 유일한 길이다 — 원하던 것보다 더 확실하다.
@@ -481,10 +497,10 @@ export function verify(candidate, inkMax, opts = {}) {
   // 조일 수 있는 최대값은 h − INK_COST 이고, 그것이 i 보다 작으면 구간이 비었다.
   const tightest = h - INK_COST;
 
-  if (tightest < i) {
+  if (tightest < i + margin) {
     return out('NO_BUDGET_WINDOW',
-      `착시 ${i} 와 그리기 ${h} 사이에 끼울 자리가 없다. ` +
-      '어떤 배급량으로도 착시를 강제할 수 없다.',
+      `착시 ${i} 에 여유 ${margin} 을 얹으면 그리기 ${h} 아래에 끼울 자리가 없다. ` +
+      '착시를 강제하면서 헛디딜 여유까지 주는 배급량이 없다.',
       redesignFix('이음매를 목표에서 더 먼 자리로 옮겨 그리기 값을 키운다.'));
   }
 
@@ -505,23 +521,19 @@ export function verify(candidate, inkMax, opts = {}) {
 // ---------------------------------------------------------------------------
 const snap = (x) => Math.max(INK_COST, Math.round(x / INK_COST) * INK_COST);
 
-export function budgetWindow(v) {
-  // 고르게 하는 층은 비싼 쪽까지 닿아야 선택이 성립한다. 바닥이 딱 그리기
-  // 값이면 정직한 길을 고르는 순간 여유가 0 이라, 고를 수는 있어도 고르고
-  // 싶지는 않은 층이 된다. 그래서 위로만 연다.
-  if (v.intent === 'open') {
-    const min = v.honestCost;
+export function budgetWindow(v, opts = {}) {
+  const { margin = WASTE_MARGIN * INK_COST } = opts;
+
+  // 어느 층이든 바닥은 "최소 해법 + 헛디딜 여유" 다. 딱 맞추면 잘못된 다리를
+  // 한 번 걸어 보는 것만으로 층을 못 끝낸다.
+  if (v.intent === 'open' || v.intent === 'honest') {
+    // 두 층 다 비싼 쪽(그리기)까지 닿아야 성립한다. 위쪽 제약은 없지만
+    // 무한정 주면 퍼즐이 아니게 되므로 실험할 만큼만 얹는다.
+    const min = v.honestCost + margin;
     return { min, max: min + snap(min * 0.3) };
   }
 
-  if (v.intent === 'honest') {
-    // 정직 층에는 위쪽 제약이 없다. 그래도 무한정 주면 퍼즐이 아니게 되므로
-    // 실험할 만큼만 얹는다.
-    const min = v.honestCost;
-    return { min, max: min + snap(min * 0.3) };
-  }
-
-  const min = v.illusionCost;
+  const min = v.illusionCost + margin;
 
   // 그리기로 아예 못 가는 층은 천장이 없다. 조일 이유도 없으므로 여유를 준다.
   if (v.honestCost === null) return { min, max: min + snap(min * 0.5) };
