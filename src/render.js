@@ -78,21 +78,26 @@ function polygon(ctx, pts) {
 // 마름모 꼭짓점은 위 → 오른쪽 → 아래 → 왼쪽 순.
 // 화면에서 보이는 옆면은 아래쪽 두 변뿐이라 두 장만 그린다.
 // 뒤쪽 면은 어차피 자기 윗면에 가려진다.
-function drawPlateCell(ctx, x, y, z) {
+function drawPlateSides(ctx, x, y, z) {
   const t = PLATE_T * view.scale;
+  const c = { right: COLOR.plateRight, left: COLOR.plateLeft };
   const base = tileDiamond(x, y, z);
   const top = base.map((p) => ({ x: p.x, y: p.y - t }));
 
-  ctx.fillStyle = COLOR.plateRight;
+  ctx.fillStyle = c.right;
   polygon(ctx, [top[1], top[2], base[2], base[1]]);
   ctx.fill();
 
-  ctx.fillStyle = COLOR.plateLeft;
+  ctx.fillStyle = c.left;
   polygon(ctx, [top[2], top[3], base[3], base[2]]);
   ctx.fill();
+}
 
+// 걷는 면. 두께만큼 올라가 있다.
+function drawPlateTop(ctx, x, y, z) {
+  const t = PLATE_T * view.scale;
   ctx.fillStyle = COLOR.plateTop;
-  polygon(ctx, top);
+  polygon(ctx, tileDiamond(x, y, z).map((p) => ({ x: p.x, y: p.y - t })));
   ctx.fill();
 }
 
@@ -108,10 +113,34 @@ export function drawPlates(ctx) {
   const actorAt = actorDepthCell();
 
   ctx.save();
+
+  // 옆면을 전부 먼저, 윗면을 전부 나중에. 칸마다 한꺼번에 그리면 이음매가
+  // 반쪽만 매끈해진다.
+  //
+  // 윗면은 바닥 마름모를 두께만큼 올려 그리므로, 화면상 **뒤쪽** 두 칸의
+  // 마름모 안으로 그만큼 파고든다. 뒤칸의 옆면이 있어야 할 자리가 바로 거기다.
+  // 그래서 앞칸의 윗면이 뒤칸의 옆면을 덮어 주면 두 윗면이 딱 맞물리고,
+  // 못 덮으면 그 두께가 단이 되어 화면에 남는다.
+  //
+  // 누가 나중에 그려지는가는 정렬 키가 정한다.
+  //
+  //   depthKey = x + y + z = (화면 gx + gy) + 3z
+  //
+  // 앞칸은 gx+gy 가 1 클 뿐이라, 뒤칸이 한 칸이라도 높으면 3z 가 그 1 을
+  // 덮어써 뒤칸이 나중에 그려진다. 그러면 뒤칸의 옆면이 앞칸 윗면 위로
+  // 올라서서, 이어져 있는 두 판이 겹쳐 놓인 두 판으로 보인다. 화면 네 방향
+  // 중 위쪽 둘에서만 일어나므로 같은 착시가 방향에 따라 달라 보였다.
+  //
+  // 두 벌로 나누면 윗면끼리는 서로 파고들 일이 없고(마름모는 정확히 맞물린다)
+  // 옆면은 앞칸 윗면이 있으면 덮이고 없으면 판의 가장자리로 남는다.
+  // "이어져 보인다면 이어진 것이다" 를 화면 쪽에서 지키는 것이 이 두 줄이다.
+  for (const c of cells) drawPlateSides(ctx, c.x, c.y, c.z);
+
   for (const c of cells) {
-    drawPlateCell(ctx, c.x, c.y, c.z);
+    drawPlateTop(ctx, c.x, c.y, c.z);
     if (actorAt && c.x === actorAt.x && c.y === actorAt.y) drawActor(ctx);
   }
+
   ctx.restore();
 }
 
