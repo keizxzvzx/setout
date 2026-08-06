@@ -31,11 +31,12 @@ export function buildStage(spec) {
 
   // 시작 발판은 한 칸뿐이다. 판이 없으면 캐릭터가 설 자리가 없어서 하나는
   // 필요하지만, 넓게 깔면 그리기를 배우기 전에 걷기부터 하게 된다.
-  addPlate([stage.start]);
+  addPlate([stage.start], 0, { fixed: true });
 
-  // 고정 구조물은 잉크를 쓰지 않고 미리 깔린다. 획으로 만든 판과 자료 구조가
-  // 같으므로 지우기·높이 조절이 그대로 먹는다.
-  for (const f of stage.fixtures) addPlate(f.cells, f.z);
+  // 고정 구조물은 잉크를 쓰지 않고 미리 깔린다. 그래서 지울 수도 없다 —
+  // 낸 적이 없는 잉크를 돌려받을 수는 없고, 솔버가 이 지형을 근거로
+  // "배급 안에서 풀린다" 를 보증했기 때문이다.
+  for (const f of stage.fixtures) addPlate(f.cells, f.z, { fixed: true });
 
   placeActor(stage.start.x, stage.start.y);
   board.goal = { ...stage.goal };
@@ -123,7 +124,15 @@ export function nextStage({ log = true } = {}) {
 // 환급이 0 이 되어 그 자리에서 걸린다 — "다 지웠는데도 잉크가 모자라면 그때
 // 다시 뜬다" 가 판정이 아니라 플레이어의 행동에서 나오는 셈이다.
 //
-// 밟은 칸은 되받을 수 없다. 한 방울도 안 돌아오기 때문이다 (2·4단계).
+// 되받을 수 있는 칸에서 두 가지를 뺀다.
+//
+//   고정 구조물   애초에 지울 수 없다(board.erase). 잉크를 낸 적이 없다
+//   밟은 칸       한 방울도 안 돌아온다 (2·4단계)
+//
+// 구조물을 세던 것이 실제로 판정을 죽였던 자리가 있다. 남은 잉크 16 / 필요
+// 18 / 세어 준 환급 6 이라 "안 막힘" 이 나왔는데, 그 6 은 전부 구조물이라
+// 지울 수가 없었다. 구조물 6칸을 지우는 64가지를 전부 돌려 봐도 풀리는 경우가
+// 없었고, 화면은 그대로 멈춰 있었다.
 export function isStuck() {
   if (board.cleared || flip.on || !board.goal) return false;
 
@@ -136,6 +145,7 @@ export function isStuck() {
 
   let refundable = 0;
   for (const c of cells) {
+    if (c.fixed) continue;
     if (board.stepped.has(key(c.x, c.y))) continue;
     refundable += stage.refund;
   }

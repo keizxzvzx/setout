@@ -134,10 +134,15 @@ export function resetBoard() {
 
 // 미리 깔아 두는 판. 잉크를 쓰지 않는다.
 //
-// 시작 발판과, 나중에 디렉터가 놓을 고정 구조물이 이것으로 들어온다.
-// 획을 그어 만든 판과 자료 구조가 같으므로 지우기·높이 조절이 그대로 먹는다.
-export function addPlate(cells, z = 0) {
-  const plate = { cells: cells.map((c) => ({ x: c.x, y: c.y })), z };
+// 시작 발판과, 디렉터가 놓는 고정 구조물이 이것으로 들어온다.
+// 획을 그어 만든 판과 자료 구조가 같으므로 높이 조절은 그대로 먹는다.
+//
+// fixed 는 "플레이어가 잉크를 낸 적이 없는 판" 이라는 표시다. 지우기가
+// 이것을 보고 물러난다(erase 참조). 높이 조절은 막지 않는다 — 올려 둔 판을
+// 플레이어가 다시 맞춰 더 싸게 푸는 것은 영리한 것이므로 막을 이유가 없다는
+// 결정이 6단계 계획에 있다.
+export function addPlate(cells, z = 0, { fixed = false } = {}) {
+  const plate = { cells: cells.map((c) => ({ x: c.x, y: c.y })), z, fixed };
   board.plates.push(plate);
   for (const c of plate.cells) board.occupied.add(key(c.x, c.y));
   return plate;
@@ -150,7 +155,9 @@ export function addPlate(cells, z = 0) {
 export function cellList() {
   const out = [];
   for (const p of board.plates) {
-    for (const c of p.cells) out.push({ x: c.x, y: c.y, z: p.z });
+    // fixed 를 같이 실어 낸다. 막힘 판정이 "되받을 수 있는 잉크" 를 셀 때
+    // 플레이어가 그린 칸과 미리 깔린 칸을 갈라야 한다(session.isStuck).
+    for (const c of p.cells) out.push({ x: c.x, y: c.y, z: p.z, fixed: p.fixed });
   }
   return out;
 }
@@ -327,6 +334,18 @@ function erase(gx, gy) {
   // 처리를 새로 만들어야 한다. 서 있는 자리를 못 지우는 것은 설명이 필요 없다.
   const a = board.actor;
   if (a && a.x === hit.x && a.y === hit.y) return;
+
+  // 미리 깔린 판은 지울 수 없다. 밟고 선 칸을 못 지우는 것과 같은 종류의
+  // 규칙이라 문구 없이 이해된다 — 지우개를 문질러도 안 지워진다.
+  //
+  // 아래의 상한만으로는 못 막는다. Math.min 은 배급을 넘지 못하게 할 뿐이라,
+  // 한 번이라도 잉크를 쓰고 나면 구조물을 지우는 것이 언제나 벌이가 된다.
+  // 실측하니 구조물 6칸에서 잉크 16 → 22 였다.
+  //
+  // 잉크만의 문제도 아니다. 솔버가 "이 층은 배급 안에서 풀린다" 를 보증한
+  // 근거가 이 지형인데, 그것을 플레이어가 공짜로 걷어내면 판정이 보증한 층과
+  // 실제로 푸는 층이 달라진다.
+  if (hit.plate.fixed) return;
 
   board.occupied.delete(key(hit.x, hit.y));
   board.erased.add(key(hit.x, hit.y));
