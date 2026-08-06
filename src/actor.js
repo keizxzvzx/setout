@@ -9,7 +9,7 @@
 import { MOVE_TIME } from './config.js';
 import { board, key, plateAt, cellList } from './board.js';
 import { findPath, isIllusion } from './path.js';
-import { worldToScreen } from './iso.js';
+import { worldToScreen, depthKey } from './iso.js';
 
 // 캐릭터가 서 있는 칸. 높이는 그 자리의 판에서 끌어온다.
 // 밟고 선 판을 휠로 올리면 캐릭터도 같이 올라간다 — 따로 갱신할 것이 없다.
@@ -126,10 +126,32 @@ export function actorScreenPos() {
   };
 }
 
-// 깊이 정렬에 끼워 넣을 칸. 이동 중에는 지금 서 있는 쪽의 칸을 쓴다.
+// 깊이 정렬에 끼워 넣을 칸.
+//
+// 이동 중에는 건너는 두 칸 중 **정렬에서 나중에 오는** 쪽을 쓴다.
+//
+// 떠나는 칸에 얹으면 도착할 칸이 캐릭터보다 나중에 그려지고, 그 윗면이
+// 캐릭터를 덮는다. 카메라 쪽(화면 아래)으로 걷는 절반의 걸음마다 일어나는데,
+// 진짜 길에서는 두 칸의 depthKey 차이가 1 이라 발치가 조금 잘리는 정도로
+// 넘어갔다. 착시 간선에서는 z 가 한꺼번에 벌어져 그 차이가 3z 만큼 커지고,
+// 그때는 캐릭터가 머리만 남기고 판 속으로 들어간다.
+//
+// 앞의 칸에 얹으면 그 걸음 동안 두 칸 다 캐릭터를 못 덮는다. 건너는 동안
+// 발은 두 칸의 이음매 위에 있으므로 어느 쪽을 골라도 자리는 맞다.
+//
+// 대가는 있다. 두 칸의 정렬 키 사이에 들어오는 제3의 판은 그 걸음 동안
+// 캐릭터를 못 가린다. 착시 간선에서는 그 구간이 3z 만큼 넓다. 다만 그쪽은
+// 판 두께 7px 이 겹치는 정도이고, 이쪽은 캐릭터가 통째로 사라지는 것이라
+// 바꿀 만하다 — 자기 말이 어디 있는지 못 보면 게임이 성립하지 않는다.
 export function actorDepthCell() {
   const a = board.actor;
   if (!a) return null;
   if (!a.path) return actorCell();
-  return a.path[Math.min(a.path.length - 1, a.leg)];
+
+  const last = a.path.length - 1;
+  const i = Math.min(last, a.leg);
+  const p = a.path[i];
+  const q = a.path[Math.min(last, i + 1)];
+
+  return depthKey(q.x, q.y, q.z) >= depthKey(p.x, p.y, p.z) ? q : p;
 }

@@ -19,12 +19,13 @@
 // 이음매 위의 색을 하나하나 확인한다.
 
 import {
-  PLATE_T, COLOR, GRID_W, GRID_H, Z_MAX,
+  PLATE_T, COLOR, GRID_W, GRID_H, Z_MAX, ACTOR_H, MOVE_TIME,
   TILE_W as C_TILE_W, TILE_H as C_TILE_H,
 } from '../src/config.js';
 import { board, key, addPlate, resetBoard } from '../src/board.js';
 import { stage, setStage } from '../src/stage.js';
 import { fitView, worldToScreen, view } from '../src/iso.js';
+import { placeActor, walkTo, updateActor, actorScreenPos } from '../src/actor.js';
 import { drawPlates } from '../src/render.js';
 import { screenCell, visibleCells, isAdjacent } from '../src/path.js';
 
@@ -305,6 +306,86 @@ function lay(cells) {
   const colors = seamColors(ctx, a, b);
   check('그 이음매가 이제 매끈하다', !stepIn(colors) && !gapIn(colors),
         [...new Set(colors)].join(' '));
+}
+
+// ---------------------------------------------------------------------------
+// 6. 건너는 동안 캐릭터가 판에 묻히지 않는다
+//
+// 깊이 정렬에 캐릭터를 끼워 넣을 때 **떠나는 칸**에 얹으면, 도착할 칸이
+// 캐릭터보다 나중에 그려져 그 윗면이 캐릭터를 덮는다. 진짜 길에서는 두 칸의
+// depthKey 차이가 1 이라 발치가 조금 잘리는 정도지만, 착시 간선에서는 z 가
+// 한꺼번에 벌어져 차이가 3z 만큼 커지고 캐릭터가 머리만 남는다.
+//
+// 자기 말이 어디 있는지 못 보면 게임이 성립하지 않고, 그 상태를 알려 줄 문구가
+// 이 게임에는 없다. 5단계에서 "캐릭터를 덮는 높이 조절을 되돌린다" 로 막은 것과
+// 같은 종류의 사고인데, 그때는 판을 올릴 때만 봤고 걸을 때는 못 봤다.
+// ---------------------------------------------------------------------------
+{
+  // 몸통을 세로로 세 점 찍는다. 발치에서 두께(PLATE_T)만큼은 다음 판의 옆면이
+  // 정상적으로 스칠 수 있으므로 그보다 위를 본다.
+  const bodyPoints = () => {
+    const pos = actorScreenPos();
+    if (!pos) return null;
+    const s = view.scale;
+    const foot = { x: pos.x, y: pos.y - PLATE_T * s };
+    return [0.5, 0.65, 0.8].map((f) => ({ x: foot.x, y: foot.y - ACTOR_H * s * f }));
+  };
+
+  function crossing(name, plates, actorAt, dest) {
+    setStage({ zMax: Z_MAX, inkMax: 999, refund: 1,
+               start: actorAt, goal: { x: 15, y: 15 }, fixtures: [] });
+    resetBoard();
+    for (const p of plates) addPlate(p.cells, p.z);
+    placeActor(actorAt.x, actorAt.y);
+
+    const ok = walkTo(dest.x, dest.y);
+    check(`${name} — 길이 있다`, ok === true);
+    if (!ok) return;
+
+    const legs = board.actor.path.length - 1;
+    let frames = 0;
+    let buried = 0;
+
+    // 한 칸에 MOVE_TIME 이므로 경로 전체를 40 프레임으로 나눠 본다
+    while (board.actor.path && frames < 400) {
+      updateActor((MOVE_TIME * legs) / 40);
+      if (!board.actor.path) break;
+      frames++;
+
+      const ctx = painter();
+      drawPlates(ctx);
+      const pts = bodyPoints();
+      if (!pts) continue;
+      if (!pts.every((p) => ctx.colorAt(p.x, p.y) === COLOR.actor)) buried++;
+    }
+
+    check(`${name} — 한 프레임도 묻히지 않는다`, buried === 0,
+          `${buried}/${frames} 프레임`);
+  }
+
+  // 착시 간선 — 뒤에서 앞으로 건넌다. depthKey 가 15 → 29 로 뛰는 자리다.
+  crossing('착시 앞으로',
+    [{ cells: [{ x: 6, y: 11 }, { x: 6, y: 10 }, { x: 6, y: 9 }], z: 0 },
+     { cells: [{ x: 8, y: 13 }, { x: 9, y: 13 }, { x: 10, y: 13 }, { x: 11, y: 13 }], z: 5 }],
+    { x: 6, y: 11 }, { x: 8, y: 13 });
+
+  // 반대 방향도. 앞에서 뒤로 갈 때는 원래 안 묻혔으므로 회귀 검사다.
+  crossing('착시 뒤로',
+    [{ cells: [{ x: 6, y: 11 }, { x: 6, y: 10 }, { x: 6, y: 9 }], z: 0 },
+     { cells: [{ x: 8, y: 13 }, { x: 9, y: 13 }, { x: 10, y: 13 }, { x: 11, y: 13 }], z: 5 }],
+    { x: 8, y: 13 }, { x: 6, y: 11 });
+
+  // 진짜 길 — 카메라 쪽으로 걷는 두 방향. 여기서도 발치가 아니라 몸통이
+  // 묻히면 안 된다.
+  crossing('진짜 오른아래',
+    [{ cells: [{ x: 8, y: 8 }, { x: 9, y: 8 }, { x: 10, y: 8 }, { x: 11, y: 8 }], z: 0 }],
+    { x: 8, y: 8 }, { x: 11, y: 8 });
+
+  crossing('진짜 왼아래',
+    [{ cells: [{ x: 8, y: 8 }, { x: 8, y: 9 }, { x: 8, y: 10 }, { x: 8, y: 11 }], z: 0 }],
+    { x: 8, y: 8 }, { x: 8, y: 11 });
+
+  board.actor = null;
 }
 
 console.log(fail ? `\n  ${fail}건 실패\n` : '\n전부 통과\n');
