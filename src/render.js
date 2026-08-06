@@ -115,6 +115,40 @@ export function drawPlates(ctx) {
   ctx.restore();
 }
 
+// 올린 판이 원래 있던 자리.
+//
+// 판을 z 만큼 올리면 화면에서는 (x−z, y−z) 로 물러나지만 기둥 (x, y) 는 계속
+// 잡혀 있다. 그 자리는 **비어 보이는데 그릴 수도 설 수도 없다.** 표시가 없으면
+// 잉크는 남았는데 선만 안 나오고, 문구가 없는 게임에서 플레이어는 무슨 일이
+// 일어났는지 알 방법이 없다.
+//
+// 3단계부터 있던 구멍인데 그때는 판을 올리는 것이 플레이어 자신이라
+// "내가 저기서 올렸지" 로 넘어갔다. 6단계 디렉터가 이음매를 미리 올려 두면서
+// 처음 드러났다 — 층당 다섯 칸꼴이었다. 그래서 누가 올렸든 똑같이 그린다.
+// 규칙이 층에 따라 달라 보이면 그것도 설명할 수 없다.
+//
+// 선으로 그린다. "아직 그리지 않은 것 = 선, 그린 것 = 면" 이 화면의 전부이고
+// 발자국은 그린 것이 아니다. 옅은 면으로 두면 판이 깔린 자리로 읽힌다.
+// 점선이라 실선인 격자와 구분되면서 같은 계열에 머문다.
+export function drawFootprints(ctx) {
+  ctx.save();
+  ctx.strokeStyle = COLOR.plateTop;
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+
+  for (const p of board.plates) {
+    if (p.z === 0) continue;
+
+    for (const c of p.cells) {
+      polygon(ctx, tileDiamond(c.x, c.y));
+      ctx.stroke();
+    }
+  }
+
+  ctx.restore();   // 점선도 여기서 같이 풀린다
+}
+
 // 목표 표식. 빈 바닥에 찍힌 앰버 마름모.
 //
 // 판이 아니라 바닥에 있으므로 그 자리까지 판을 그려야 닿는다.

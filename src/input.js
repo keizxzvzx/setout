@@ -10,6 +10,7 @@ import {
   beginErase, extendErase, commitErase,
 } from './board.js';
 import { walkTo } from './actor.js';
+import { flip } from './session.js';
 
 // cell  : 커서가 가리키는 바닥칸. 부지 밖이거나 창을 벗어나면 null
 // hit   : 커서 아래에 실제로 보이는 판 칸. 없으면 null
@@ -53,6 +54,10 @@ export function attachPointer(canvas) {
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   canvas.addEventListener('pointerdown', (e) => {
+    // 도면을 넘기는 중에는 받지 않는다. 손 밑에서 도면이 빠져나가는 중이라
+    // 어느 층에 그은 것인지가 정해지지 않는다.
+    if (flip.on) return;
+
     // 이미 한 버튼으로 작업 중이면 다른 버튼은 무시한다.
     // 좌클릭으로 긋다가 우클릭이 끼어들면 두 동작이 섞인다.
     if (pointer.mode) return;
@@ -142,7 +147,7 @@ export function attachPointer(canvas) {
 
   canvas.addEventListener('wheel', (e) => {
     // 긋는 중에는 무시한다. 한 손으로 두 가지를 하는 상황이라 의도를 알 수 없다.
-    if (pointer.mode) return;
+    if (pointer.mode || flip.on) return;
 
     if (!wheelHit) {
       const pc = toPlateCell(e);

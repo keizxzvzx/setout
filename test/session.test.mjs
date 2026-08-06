@@ -5,13 +5,17 @@
 // 매 층 백지에서 읽게 되는데, 그래도 게임은 멀쩡히 돌아간다.
 
 import * as C from '../src/config.js';
+import * as Board from '../src/board.js';
 import { board, key, plateAt } from '../src/board.js';
 import { stage } from '../src/stage.js';
 import { fitView, worldToScreen, view } from '../src/iso.js';
 import { actorCell } from '../src/actor.js';
 import { verify, candidateCells } from '../src/director.js';
 import { isIllusion } from '../src/path.js';
-import { session, beginRun, nextStage, buildStage } from '../src/session.js';
+import {
+  session, beginRun, nextStage, buildStage, beginFlip, updateFlip, flip, FLIP_TIME,
+  isStuck, redealStage,
+} from '../src/session.js';
 
 let fail = 0;
 const check = (name, cond, extra = '') => {
@@ -21,6 +25,13 @@ const check = (name, cond, extra = '') => {
 
 // 브라우저가 하는 일. 이걸 안 하면 iso 가 기억할 창 크기가 없다.
 fitView(1489, 863);
+
+// 획 하나를 긋는다
+const B_draw = (cells) => {
+  Board.beginStroke(cells[0]);
+  for (const c of cells.slice(1)) Board.extendStroke(c);
+  return Board.commitStroke();
+};
 
 // ---------------------------------------------------------------------------
 // 1. 판을 시작한다 — 1층은 손으로 잡아 둔 고정 배치
@@ -199,7 +210,179 @@ fitView(1489, 863);
 }
 
 // ---------------------------------------------------------------------------
-// 6. 다시 시작하면 백지인가
+// 6. 도면을 넘긴다
+//
+// 지금 장이 위로 빠지고 다음 장이 아래에서 올라온다. 바닥 격자는 안 움직인다 —
+// 매 층 똑같은 청사진이라 제도판에 해당하고, 넘어가는 것은 그 위에 그린
+// 도면이다. 덕분에 두 층을 동시에 그릴 필요가 없다.
+// ---------------------------------------------------------------------------
+{
+  beginRun();
+  const goalBefore = { ...board.goal };
+  const stageBefore = session.stages;
+
+  check('평소에는 밀려나 있지 않다', updateFlip(0.1, { log: false }) === 0);
+  check('넘기는 중이 아니다', flip.on === false);
+
+  beginFlip();
+  check('넘기기 시작한다', flip.on === true && flip.t === 0);
+
+  // 프레임을 흘려보내며 밀려난 정도를 모은다
+  const step = 1 / 60;
+  const shifts = [];
+  let swapAt = -1;
+  let frames = 0;
+
+  while (flip.on && frames < 600) {
+    const s = updateFlip(step, { log: false });
+    shifts.push(s);
+    if (swapAt < 0 && flip.swapped) swapAt = frames;
+    frames++;
+  }
+
+  const secs = frames * step;
+  check('두 방향을 합쳐 정해진 시간에 끝난다',
+        Math.abs(secs - FLIP_TIME * 2) < 0.05, `${secs.toFixed(2)}초`);
+  check('끝나면 제자리로 돌아온다', flip.on === false && updateFlip(step) === 0);
+
+  const out = shifts.slice(0, swapAt);
+  const back = shifts.slice(swapAt);
+
+  check('앞부분은 위로 빠진다', out.every((s) => s <= 0) && Math.min(...out) < -0.9,
+        `최대 ${Math.min(...out).toFixed(2)}`);
+  check('뒷부분은 아래에서 올라온다', back.every((s) => s >= 0) && Math.max(...back) > 0.9,
+        `최대 ${Math.max(...back).toFixed(2)}`);
+  check('한 방향으로만 간다 — 도로 돌아오지 않는다',
+        out.every((s, i) => i === 0 || s <= out[i - 1])
+        && back.every((s, i) => i === 0 || s <= back[i - 1]));
+
+  // 층이 갈리는 순간 화면에는 빈 도면만 있어야 한다.
+  // 그래야 무엇이 사라지고 무엇이 나타나는지 보이지 않는다.
+  check('한복판에서 층이 갈린다', Math.abs(swapAt / frames - 0.5) < 0.05,
+        `${(swapAt / frames * 100).toFixed(0)}% 지점`);
+  check('갈리는 순간 도면은 화면 밖에 있다', Math.abs(shifts[swapAt - 1]) > 0.95,
+        `${shifts[swapAt - 1].toFixed(2)}`);
+
+  check('층이 실제로 넘어갔다', session.stages === stageBefore + 1
+        && (board.goal.x !== goalBefore.x || board.goal.y !== goalBefore.y),
+        `(${goalBefore.x},${goalBefore.y}) → (${board.goal.x},${board.goal.y})`);
+  check('넘긴 뒤에는 클리어가 내려가 있다', board.cleared === false);
+}
+
+// ---------------------------------------------------------------------------
+// 7. 못 쓰게 된 도면을 다시 뜬다
+//
+// 밟은 칸은 환급이 0 이라 잘못 걸어 본 만큼의 잉크는 영영 안 돌아온다.
+// 여유를 넘겨 헛디디면 층을 끝낼 방법이 사라지는데, 그때 아무 일도 안
+// 일어나는 것이 제일 나쁘다 — 문구가 없는 게임이라 그냥 고장으로 보인다.
+// ---------------------------------------------------------------------------
+{
+  beginRun();
+
+  check('막 시작한 층은 막히지 않았다', isStuck() === false);
+
+  // 잉크를 다 태우고 아무 데도 못 가게 만든다
+  board.ink = 0;
+  check('잉크가 없고 길도 없으면 막힌 것', isStuck() === true, `잉크 ${board.ink}`);
+
+  // 지워서 되받을 수 있는 잉크가 있으면 아직 막힌 것이 아니다.
+  // 판정은 한쪽으로만 틀려야 한다 — 멀쩡한 층을 막혔다고 하면 안 된다.
+  //
+  // 목표는 두 칸 앞(4 필요), 엉뚱한 데 여섯 칸을 그어 두었다(6 회수 가능).
+  // 잉크를 다 태워도 그 여섯 칸을 지우면 닿는다.
+  buildStage({ start: { x: 3, y: 3 }, goal: { x: 3, y: 5 }, inkMax: 20, zMax: 8 });
+
+  const spur = [];
+  for (let y = 10; y <= 15; y++) spur.push({ x: 10, y });
+  B_draw(spur);
+  board.ink = 0;   // 그은 **뒤에** 태운다
+
+  check('되받을 잉크가 남아 있으면 막힌 것이 아니다', isStuck() === false,
+        `밟지 않은 칸 ${spur.length}개, 필요 4`);
+
+  // 밟아 버리면 그 잉크는 안 돌아온다
+  for (const c of spur) board.stepped.add(key(c.x, c.y));
+  check('밟은 칸뿐이면 막힌 것', isStuck() === true);
+
+  check('클리어한 층은 막혔다고 하지 않는다',
+        (board.cleared = true, isStuck() === false));
+  board.cleared = false;
+}
+
+// ---------------------------------------------------------------------------
+// 8. 다시 뜬 도면은 같은 층인가
+//
+// 새로 만들지 않는다. 플레이어가 풀려던 층이 이것이고, 실패했다고 다른 문제를
+// 내밀면 방금까지 읽던 것이 무의미해진다.
+// ---------------------------------------------------------------------------
+{
+  beginRun();
+  board.cleared = true;
+  const r = nextStage({ log: false });
+
+  const spec = {
+    inkMax: stage.inkMax, zMax: stage.zMax,
+    start: { ...stage.start }, goal: { ...stage.goal },
+    cells: stage.fixtures.reduce((n, f) => n + f.cells.length, 0),
+  };
+  const stagesBefore = session.stages;
+  const grantedBefore = session.granted;
+
+  // 헛디뎌서 못 쓰게 만든다
+  board.ink = 0;
+  board.stats.inkSpent += 40;
+  const statsBefore = { ...board.stats };
+
+  redealStage({ log: false });
+
+  check('같은 배급·같은 상한', stage.inkMax === spec.inkMax && stage.zMax === spec.zMax,
+        `${stage.inkMax} / ${stage.zMax}`);
+  check('같은 시작·같은 목표',
+        stage.start.x === spec.start.x && stage.start.y === spec.start.y
+        && stage.goal.x === spec.goal.x && stage.goal.y === spec.goal.y);
+  check('같은 구조물',
+        stage.fixtures.reduce((n, f) => n + f.cells.length, 0) === spec.cells);
+  check('잉크가 다시 찬다', board.ink === stage.inkMax, `${board.ink}`);
+  check('층 수는 안 올라간다 — 넘어간 것이 아니다', session.stages === stagesBefore);
+  check('다시 뜬 횟수가 센다', session.redeals === 1);
+
+  // 두 번 쓴 잉크가 한 번 준 배급에 나뉘면, 디렉터가 이 사람을 실제보다
+  // 훨씬 바짝 쓰는 사람으로 읽는다.
+  check('다시 준 배급도 분모에 들어간다',
+        session.granted === grantedBefore + stage.inkMax,
+        `${grantedBefore} → ${session.granted}`);
+  check('지표는 그대로 남는다', board.stats.inkSpent === statsBefore.inkSpent);
+  check('다시 뜬 층은 막히지 않았다', isStuck() === false);
+}
+
+// ---------------------------------------------------------------------------
+// 9. 넘기기 연출은 하나를 같이 쓴다
+// ---------------------------------------------------------------------------
+{
+  beginRun();
+  const stagesBefore = session.stages;
+
+  beginFlip({ redeal: true });
+  check('다시 뜨는 넘기기로 표시된다', flip.redeal === true);
+
+  let n = 0;
+  while (flip.on && n < 600) { updateFlip(1 / 60, { log: false }); n++; }
+
+  check('연출은 같은 시간이 걸린다', Math.abs(n / 60 - FLIP_TIME * 2) < 0.05,
+        `${(n / 60).toFixed(2)}초`);
+  check('다시 뜨는 넘기기는 층을 안 올린다', session.stages === stagesBefore,
+        `${session.stages}`);
+  check('1층 그대로다', stage.start.x === C.START_CELL.x);
+
+  beginFlip();
+  check('그냥 넘기기는 표시가 없다', flip.redeal === false);
+  n = 0;
+  while (flip.on && n < 600) { updateFlip(1 / 60, { log: false }); n++; }
+  check('그때는 층이 올라간다', session.stages === stagesBefore + 1);
+}
+
+// ---------------------------------------------------------------------------
+// 10. 다시 시작하면 백지인가
 // ---------------------------------------------------------------------------
 {
   beginRun();

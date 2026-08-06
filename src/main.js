@@ -1,11 +1,12 @@
 // SETOUT — 진입점
 
-import { fitView } from './iso.js';
+import { fitView, view, setView } from './iso.js';
 import { board } from './board.js';
 import { updateActor } from './actor.js';
-import { beginRun, nextStage } from './session.js';
+import { beginRun, beginFlip, updateFlip, flip, isStuck } from './session.js';
 import {
-  clear, drawFloor, drawGoal, drawPlates, drawStroke, drawHoverCell, drawInkGauge,
+  clear, drawFloor, drawFootprints, drawGoal, drawPlates,
+  drawStroke, drawHoverCell, drawInkGauge,
 } from './render.js';
 import { pointer, attachPointer } from './input.js';
 
@@ -15,9 +16,14 @@ const ctx = canvas.getContext('2d');
 let viewW = 0;
 let viewH = 0;
 
-// 목표에 닿고 나서 다음 층까지 두는 사이. 도착한 것을 볼 새는 줘야 한다.
-const CLEAR_PAUSE = 1.2;
+// 목표에 닿고 나서 도면을 넘기기까지 두는 사이. 도착한 것을 볼 새는 줘야 한다.
+const CLEAR_PAUSE = 0.8;
 let clearedFor = 0;
+
+// 못 쓰게 된 도면을 다시 뜨기까지. 이만큼 계속 막혀 있어야 움직인다.
+// 손을 놓고 잠깐 두었을 때만 반응해야, 지우는 중에 도면이 넘어가지 않는다.
+const STUCK_PAUSE = 0.9;
+let stuckFor = 0;
 
 function resize() {
   const dpr = window.devicePixelRatio || 1;
@@ -43,22 +49,53 @@ function frame(now) {
 
   updateActor(dt);
 
-  // 도착하면 잠깐 두었다가 다음 층으로. 디렉터는 여기서 처음 불린다.
-  if (board.cleared) {
+  // 도착하면 잠깐 두었다가 도면을 넘긴다. 디렉터는 넘기는 한복판에서 불린다.
+  if (board.cleared && !flip.on) {
     clearedFor += dt;
     if (clearedFor >= CLEAR_PAUSE) {
       clearedFor = 0;
-      nextStage();
+      beginFlip();
     }
   }
 
+  // 더 갈 수 없게 된 도면은 다시 뜬다. 아무 일도 안 일어나는 것이 제일 나쁘다.
+  //
+  // 손을 놓고 있을 때만 본다. 긋거나 지우는 중에는 아직 판단이 안 끝난 상태라
+  // 그때 도면이 넘어가면 플레이어가 하던 일을 뺏긴다.
+  const idle = !pointer.mode && !board.actor?.path;
+  stuckFor = idle && isStuck() ? stuckFor + dt : 0;
+
+  if (stuckFor >= STUCK_PAUSE) {
+    stuckFor = 0;
+    beginFlip({ redeal: true });
+  }
+
+  const shift = updateFlip(dt);
+
   clear(ctx, viewW, viewH);
+
+  // 바닥은 제도판이라 움직이지 않는다. 넘어가는 것은 그 위에 그린 도면이다.
   drawFloor(ctx);
+
+  const baseY = view.oy;
+  if (shift) setView(view.ox, baseY + shift * viewH, view.scale);
+
+  // 발자국은 바닥 다음, 목표 앞. 그 자리에 판이 다시 깔리면 가려지는 것이 맞고,
+  // 목표 표식이 발자국에 묻히면 어디로 가야 하는지가 안 보인다.
+  drawFootprints(ctx);
   drawGoal(ctx);        // 바닥에 찍힌 표식. 판을 깔면 가려지는 것이 맞다
   drawPlates(ctx);      // 캐릭터는 자기가 선 칸 다음에 여기서 같이 그려진다
-  drawStroke(ctx);
-  // 긋는 중에는 획 자체가 커서를 대신하므로 하이라이트를 겹쳐 띄우지 않는다.
-  if (pointer.mode !== 'draw') drawHoverCell(ctx, pointer);
+
+  if (shift) setView(view.ox, baseY, view.scale);
+
+  // 넘어가는 동안에는 커서를 그리지 않는다. 도면이 손 밑을 빠져나가는 중이라
+  // 무엇을 겨냥하고 있는지가 뜻을 잃는다.
+  if (!flip.on) {
+    drawStroke(ctx);
+    // 긋는 중에는 획 자체가 커서를 대신하므로 하이라이트를 겹쳐 띄우지 않는다.
+    if (pointer.mode !== 'draw') drawHoverCell(ctx, pointer);
+  }
+
   drawInkGauge(ctx, viewW, viewH);
 
   requestAnimationFrame(frame);
