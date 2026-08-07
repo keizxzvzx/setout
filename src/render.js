@@ -351,6 +351,294 @@ export function drawInkGauge(ctx, viewW, viewH) {
   ctx.restore();
 }
 
+// 조작 표시. 좌측 상단.
+//
+// 계획서의 "튜토리얼 문구 없음, 대사 없음" 과 부딪치는 유일한 자리다.
+// 그 원칙은 **플레이어가 스스로 배우게 두는 것**이 목적이었고, 바닥을 문지르면
+// 선이 나오는 것까지는 지금도 그대로 성립한다. 그런데 판 위와 빈 바닥에서
+// 같은 좌클릭이 다른 일을 하는 것, 그리고 휠이 높이를 바꾼다는 것은 눌러 보기
+// 전에는 알 방법이 없다. 심사자가 링크를 열어 한 번 보고 판단하는 상황에서
+// 그것을 발견에 맡길 수는 없다.
+//
+// 대신 화면을 뺏지 않게 잡았다. 청사진 팔레트 안에서만 쓰고, 투명도를 낮춰
+// 바닥보다 조금 진한 정도에 둔다. 앰버는 쓰지 않는다 — 잉크 게이지와 목표
+// 표식의 색이라 여기 쓰면 "이것이 자원이다" 가 흐려진다. 4단계에서 캐릭터
+// 색을 고를 때 세운 규율 그대로다.
+//
+// 자리는 좌측 상단, 여백은 잉크 게이지와 같은 VIEW_MARGIN. 게이지가 좌하단
+// 이므로 둘이 대각으로 마주 보고, 판은 화면 중앙에 놓이므로 겹치지 않는다.
+
+// 표시할 조작. 검사가 이것을 실제 입력 규칙과 대조한다 — 화면이 하는 말과
+// input.js 가 하는 일이 갈리면 문구가 없는 것보다 나쁘다.
+export const CONTROLS = [
+  ['L', 'DRAW · WALK'],
+  ['R', 'ERASE'],
+  ['W', 'LIFT'],
+];
+
+// 화면 모서리 표시가 같이 쓰는 값. 조작 표시와 층 번호가 한 쌍으로 읽히려면
+// 상자 크기와 재질이 같아야 한다.
+const HUD = {
+  fontPx: 11,
+  pad: 11,          // 상자 안쪽 여백
+  mouseW: 15,
+  mouseH: 22,
+  rowGap: 9,        // 마우스 줄 사이
+  labelGap: 11,     // 마우스와 글자 사이
+};
+
+// 층 번호 상자는 조작 안내의 이만큼이다.
+//
+// 같은 크기로 맞춰 봤더니 번호 쪽이 너무 컸다. 담을 것이 두 글자뿐인데
+// 세 줄짜리 상자와 같은 자리를 차지하면, 읽을 것이 적은 쪽이 더 크게 보인다.
+// 조작 안내는 처음 한 번 읽고 마는 것이고 층 번호는 계속 눈에 남으므로
+// 이쪽이 더 조용해야 맞다.
+const SHEET_SCALE = 2 / 3;
+
+const hudFont = (px = HUD.fontPx) =>
+  `${px}px ui-monospace, "DejaVu Sans Mono", monospace`;
+
+// 상자 크기는 조작 표시가 정한다. 그쪽이 담을 것이 가장 많고, 글자 폭을 재서
+// 구하므로 문구를 바꾸면 두 상자가 같이 따라온다.
+function hudBox(ctx) {
+  ctx.save();
+  ctx.font = hudFont();
+  let labelW = 0;
+  for (const [, label] of CONTROLS) labelW = Math.max(labelW, ctx.measureText(label).width);
+  ctx.restore();
+
+  return {
+    w: HUD.pad + HUD.mouseW + HUD.labelGap + labelW + HUD.pad,
+    h: HUD.pad * 2 + CONTROLS.length * HUD.mouseH + (CONTROLS.length - 1) * HUD.rowGap,
+  };
+}
+
+// 글자 사이를 벌려 찍는다.
+//
+// ctx.letterSpacing 은 최신 브라우저에만 있다. 마우스 윤곽을 roundRect 대신
+// 호로 짠 것과 같은 이유로 쓰지 않는다 — 심사자가 무엇을 열지 알 수 없다.
+function trackedText(ctx, text, x, y, track) {
+  let cx = x;
+  for (const ch of text) {
+    ctx.fillText(ch, cx, y);
+    cx += ctx.measureText(ch).width + track;
+  }
+}
+
+function trackedWidth(ctx, text, track) {
+  let w = 0;
+  for (const ch of text) w += ctx.measureText(ch).width + track;
+  return w - track;
+}
+
+// 상자 바탕과 테두리. 잉크 게이지와 같은 값이라 셋이 같은 재질로 읽힌다.
+function hudPanel(ctx, x, y, w, h) {
+  // 바닥을 한 겹 덮는다. 격자선이 글자 뒤로 지나가면 읽기가 나빠진다.
+  ctx.fillStyle = COLOR.bg;
+  ctx.globalAlpha = 0.72;
+  ctx.fillRect(x, y, w, h);
+
+  ctx.strokeStyle = COLOR.gridEdge;
+  ctx.globalAlpha = 0.5;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
+}
+
+// 마우스 실루엣의 윤곽. 그리는 데도 쓰고, 버튼 강조를 가둘 때도 쓴다.
+//
+// roundRect 를 쓰지 않고 호와 선으로 짠다. 이 게임은 라이브러리를 하나도
+// 쓰지 않는데 캔버스 최신 API 에 기대면 구형 브라우저에서 조용히 죽는다.
+// 심사자가 무엇을 쓸지는 알 수 없다 — 3단계 휠 사고와 같은 종류의 대비다.
+function mouseOutline(ctx, x, y, w, h) {
+  const rt = w / 2;                       // 위는 반원
+  const rb = Math.min(5, w / 3);          // 아래는 살짝만
+
+  ctx.beginPath();
+  ctx.moveTo(x, y + rt);
+  ctx.arc(x + rt, y + rt, rt, Math.PI, 0);
+  ctx.lineTo(x + w, y + h - rb);
+  ctx.arc(x + w - rb, y + h - rb, rb, 0, Math.PI / 2);
+  ctx.lineTo(x + rb, y + h);
+  ctx.arc(x + rb, y + h - rb, rb, Math.PI / 2, Math.PI);
+  ctx.closePath();
+}
+
+// 마우스 하나. hit 이 'L' | 'R' | 'W' 면 그 자리를 채운다.
+function drawMouse(ctx, x, y, w, h, hit) {
+  const split = h * 0.42;                 // 버튼과 몸통이 갈리는 높이
+  const cx = x + w / 2;
+
+  // 강조는 윤곽 안쪽에만. 사각형을 그대로 칠하면 위쪽 반원을 뚫고 나온다.
+  //
+  // 자르는 길과 그리는 길이 같아야 한다. 반 픽셀이라도 어긋나면 둥근 머리
+  // 언저리에 실오라기가 남는데, 그런 것은 확대해 보기 전까지 안 보인다.
+  ctx.save();
+  mouseOutline(ctx, x + 0.5, y + 0.5, w, h);
+  ctx.clip();
+
+  ctx.fillStyle = COLOR.plateTop;
+  ctx.globalAlpha = 0.85;
+  if (hit === 'L') ctx.fillRect(x, y, w / 2, split);
+  if (hit === 'R') ctx.fillRect(cx, y, w / 2, split);
+  if (hit === 'W') {
+    // 휠도 마우스 크기를 따라간다. 고정값으로 두면 상자를 줄였을 때
+    // 알약이 버튼 칸보다 길어져 위아래가 뒤집힌다.
+    const ww = Math.max(2, w * 0.22);
+    const top = y + ww;
+    const bot = Math.max(top + ww, y + split - ww * 0.5);
+    ctx.beginPath();
+    ctx.arc(cx, top + ww / 2, ww / 2, Math.PI, 0);
+    ctx.lineTo(cx + ww / 2, bot - ww / 2);
+    ctx.arc(cx, bot - ww / 2, ww / 2, 0, Math.PI);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  ctx.strokeStyle = COLOR.gridEdge;
+  ctx.globalAlpha = 0.45;
+  ctx.lineWidth = 1;
+
+  mouseOutline(ctx, x + 0.5, y + 0.5, w, h);
+  ctx.stroke();
+
+  // 버튼 경계. 가로선은 split 이 반원보다 아래라 몸통 폭을 그대로 가로지른다.
+  ctx.beginPath();
+  ctx.moveTo(x + 0.5, y + split + 0.5);
+  ctx.lineTo(x + w + 0.5, y + split + 0.5);
+  ctx.moveTo(cx + 0.5, y + 0.5);
+  ctx.lineTo(cx + 0.5, y + split + 0.5);
+  ctx.stroke();
+}
+
+export function drawControls(ctx) {
+  ctx.save();
+  ctx.font = hudFont();
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+
+  const { w: bw, h: bh } = hudBox(ctx);
+  const bx = VIEW_MARGIN;
+  const by = VIEW_MARGIN;
+
+  hudPanel(ctx, bx, by, bw, bh);
+
+  CONTROLS.forEach(([hit, label], i) => {
+    const y = by + HUD.pad + i * (HUD.mouseH + HUD.rowGap);
+    drawMouse(ctx, bx + HUD.pad, y, HUD.mouseW, HUD.mouseH, hit);
+
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = COLOR.plateTop;
+    ctx.fillText(label, bx + HUD.pad + HUD.mouseW + HUD.labelGap, y + HUD.mouseH / 2 + 0.5);
+  });
+
+  ctx.restore();
+}
+
+// 층 번호. 우측 상단.
+//
+// 실제 도면 모서리의 표제란(title block) 모양이다. 위 칸에 무엇을 세는지,
+// 아래 칸에 번호. SETOUT 이 제도 용어이고 층 전환도 "도면을 넘긴다" 로 잡았으니
+// 도면 모서리에 표제란이 있는 것은 설명이 필요 없다. STAGE 나 LEVEL 로 두면
+// 뜻은 분명해도 청사진 톤에서 튀고, LEVEL 은 높이(z)와 헷갈린다.
+//
+// 번호는 부르는 쪽이 넘겨준다. 여기서 session 을 읽으면 렌더가 판 상태를
+// 넘어 판의 이력까지 알게 되고, 그 순간 이 파일만 따로 시험할 수 없게 된다.
+//
+// 숫자가 바뀌는 시점은 따로 맞출 것이 없다. session.stages 는 도면이 갈리는
+// 한복판(flip.t = 0.5)에서 올라가는데, 그때 화면에는 빈 도면만 있으므로
+// 숫자가 튀는 것이 보이지 않는다.
+export function drawSheetNo(ctx, viewW, n) {
+  const LABEL = 'SHEET';
+
+  ctx.save();
+  ctx.textBaseline = 'middle';
+
+  // 크기는 조작 안내에서 끌어온다. 저쪽 문구가 바뀌어 상자가 커지면 이쪽도
+  // 같은 비율로 따라간다 — 두 모서리의 관계가 값 하나로 유지된다.
+  const box = hudBox(ctx);
+  const bh = Math.round(box.h * SHEET_SCALE);
+  const pad = Math.round(HUD.pad * SHEET_SCALE);
+
+  // 두 칸의 비율. 처음에는 라벨 칸을 마우스 한 줄 높이로 잡았는데, 상자를
+  // 2/3 으로 줄이자 글자가 7px 이 되어 읽히지 않았다. 번호 칸을 조금 내주고
+  // 라벨 칸을 키운다 — 안 읽히는 라벨은 없느니만 못하다.
+  const row = Math.round(bh * 0.34);                  // 라벨 칸
+  const bot = bh - row;                               // 번호 칸
+
+  // 글자는 각자 자기 칸에서 나온다. 상자 비율을 바꾸면 둘 다 따라온다.
+  const labelFont = Math.max(9, Math.round(row * 0.45));
+  const numFont = Math.round(bot * 0.62);
+  ctx.font = hudFont(numFont);
+
+  const num = String(n).padStart(2, '0');
+  const bw = Math.max(Math.round(box.w * SHEET_SCALE),
+                      ctx.measureText(num).width + pad * 2);
+
+  const bx = viewW - VIEW_MARGIN - bw;
+  const by = VIEW_MARGIN;
+
+  hudPanel(ctx, bx, by, bw, bh);
+
+  // 두 칸을 가르는 선. 조작 안내에는 없는 것이라 표제란으로 읽힌다.
+  ctx.beginPath();
+  ctx.moveTo(bx, by + row + 0.5);
+  ctx.lineTo(bx + bw, by + row + 0.5);
+  ctx.stroke();
+
+  ctx.font = hudFont(labelFont);
+  ctx.textAlign = 'left';
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = COLOR.gridEdge;
+  ctx.fillText(LABEL, bx + pad, by + row / 2 + 0.5);
+
+  ctx.font = hudFont(numFont);
+  ctx.textAlign = 'right';
+  ctx.globalAlpha = 0.8;
+  ctx.fillStyle = COLOR.plateTop;
+  ctx.fillText(num, bx + bw - pad, by + row + bot / 2 + 1);
+
+  ctx.restore();
+}
+
+// 도면명. 우측 하단.
+//
+// 제도 규격에서 표제란은 도면 우하단에 있고 거기에 도면명과 도면번호가 함께
+// 들어간다. 이 게임은 화면 전체가 한 장의 도면이므로 이름이 그 자리에 있는
+// 것이 장식이 아니라 도면의 일부가 된다.
+//
+// 층 번호와 한 상자로 묶지 않은 이유는 번호가 매 층 바뀌기 때문이다. 이름은
+// 안 바뀌는 것이고 번호는 바뀌는 것이라, 한 칸에 두면 안 바뀌는 쪽까지
+// 눈길을 끈다.
+//
+// 시트 상자보다 작다. 담을 것이 한 줄뿐인데 크게 두면 읽을 것이 없는 쪽이
+// 더 크게 보인다 — SHEET_SCALE 을 정할 때와 같은 이유다.
+export function drawLogo(ctx, viewW, viewH) {
+  const TITLE = 'SETOUT';
+
+  ctx.save();
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+
+  const pad = Math.round(HUD.pad * SHEET_SCALE);
+  const track = 3;                          // 제도 라벨처럼 자간을 벌린다
+
+  ctx.font = hudFont();
+  const bw = trackedWidth(ctx, TITLE, track) + pad * 2;
+  const bh = HUD.fontPx + pad * 2;
+
+  const bx = viewW - VIEW_MARGIN - bw;
+  const by = viewH - VIEW_MARGIN - bh;      // 잉크 게이지와 아랫변이 맞는다
+
+  hudPanel(ctx, bx, by, bw, bh);
+
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = COLOR.plateTop;
+  trackedText(ctx, TITLE, bx + pad, by + bh / 2 + 0.5, track);
+
+  ctx.restore();
+}
+
 // 커서가 가리키는 칸. 스타일러스 끝이 닿은 자리라는 뜻으로 앰버.
 //
 // 이 하이라이트는 연출이기 이전에 좌표계 검증 도구다.

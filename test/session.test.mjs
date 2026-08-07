@@ -227,15 +227,17 @@ const B_draw = (cells) => {
   beginFlip();
   check('넘기기 시작한다', flip.on === true && flip.t === 0);
 
-  // 프레임을 흘려보내며 밀려난 정도를 모은다
+  // 프레임을 흘려보내며 밀려난 정도와, 그 프레임에 표제란이 보일 번호를 모은다
   const step = 1 / 60;
   const shifts = [];
+  const sheets = [];
   let swapAt = -1;
   let frames = 0;
 
   while (flip.on && frames < 600) {
     const s = updateFlip(step, { log: false });
     shifts.push(s);
+    sheets.push(session.stages + 1);     // main.js 가 drawSheetNo 에 넘기는 값
     if (swapAt < 0 && flip.swapped) swapAt = frames;
     frames++;
   }
@@ -267,6 +269,13 @@ const B_draw = (cells) => {
         && (board.goal.x !== goalBefore.x || board.goal.y !== goalBefore.y),
         `(${goalBefore.x},${goalBefore.y}) → (${board.goal.x},${board.goal.y})`);
   check('넘긴 뒤에는 클리어가 내려가 있다', board.cleared === false);
+
+  // 우상단 표제란이 읽는 값이 이것이다. 도면이 갈리는 그 프레임에서 넘어가야
+  // 숫자가 튀는 순간 화면에 빈 도면만 있다. 한 프레임이라도 이르거나 늦으면
+  // 판이 남아 있는 채로 번호가 바뀐다.
+  check('층 번호도 갈리는 그 프레임에서 넘어간다',
+        sheets[swapAt - 1] === stageBefore + 1 && sheets[swapAt] === stageBefore + 2,
+        `${sheets[swapAt - 1]} → ${sheets[swapAt]}`);
 }
 
 // ---------------------------------------------------------------------------

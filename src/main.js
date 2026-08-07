@@ -3,10 +3,10 @@
 import { fitView, view, setView } from './iso.js';
 import { board } from './board.js';
 import { updateActor } from './actor.js';
-import { beginRun, beginFlip, updateFlip, flip, isStuck } from './session.js';
+import { session, beginRun, beginFlip, updateFlip, flip, isStuck } from './session.js';
 import {
   clear, drawFloor, drawFootprints, drawGoal, drawPlates,
-  drawStroke, drawHoverCell, drawInkGauge,
+  drawStroke, drawHoverCell, drawInkGauge, drawControls, drawSheetNo, drawLogo,
 } from './render.js';
 import { pointer, attachPointer, abortGesture, resyncPointer } from './input.js';
 
@@ -106,7 +106,14 @@ function frame(now) {
     if (pointer.mode !== 'draw') drawHoverCell(ctx, pointer);
   }
 
+  // 이 넷은 도면이 아니라 제도판 위의 표시다. 층이 넘어가도 제자리에 있는다.
+  //
+  // 층 번호만 도면을 따라 바뀐다. session.stages 가 도면이 갈리는 한복판에서
+  // 올라가므로, 숫자가 튀는 순간 화면에는 빈 도면만 있다.
   drawInkGauge(ctx, viewW, viewH);
+  drawControls(ctx);
+  drawSheetNo(ctx, viewW, session.stages + 1);
+  drawLogo(ctx, viewW, viewH);
 
   requestAnimationFrame(frame);
 }
