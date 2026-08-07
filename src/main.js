@@ -94,7 +94,7 @@ function frame(now) {
   // 목표 표식이 발자국에 묻히면 어디로 가야 하는지가 안 보인다.
   drawFootprints(ctx);
   drawGoal(ctx);        // 바닥에 찍힌 표식. 판을 깔면 가려지는 것이 맞다
-  drawPlates(ctx);      // 캐릭터는 자기가 선 칸 다음에 여기서 같이 그려진다
+  drawPlates(ctx);      // 캐릭터는 판을 전부 그린 뒤 여기서 같이 그려진다
 
   if (shift) setView(view.ox, baseY, view.scale);
 

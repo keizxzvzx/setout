@@ -10,7 +10,7 @@ import {
 import { stage } from './stage.js';
 import { worldToScreen, tileDiamond, depthKey, view } from './iso.js';
 import { board, parseKey, inkAvailable, cellList } from './board.js';
-import { actorScreenPos, actorDepthCell } from './actor.js';
+import { actorScreenPos } from './actor.js';
 
 export function clear(ctx, w, h) {
   ctx.fillStyle = COLOR.bg;
@@ -65,6 +65,13 @@ function polygon(ctx, pts) {
   ctx.closePath();
 }
 
+// 미리 깔린 판은 색이 다르다. 지울 수 없다는 것을 문구 없이 알리는 유일한
+// 표시다 — 지우개를 문질러 아무 일도 안 일어나는 것으로 배우게 두면
+// 그건 규칙이 아니라 고장으로 읽힌다. config 의 fixed* 참조.
+const skin = (fixed) => (fixed
+  ? { top: COLOR.fixedTop, right: COLOR.fixedRight, left: COLOR.fixedLeft }
+  : { top: COLOR.plateTop, right: COLOR.plateRight, left: COLOR.plateLeft });
+
 // 칸 하나를 두께 있는 철판으로 그린다.
 //
 // 두께는 바닥 평면에서 위로 세운다. 아래로 뻗으면 등각 화면에서 아래쪽이
@@ -78,13 +85,6 @@ function polygon(ctx, pts) {
 // 마름모 꼭짓점은 위 → 오른쪽 → 아래 → 왼쪽 순.
 // 화면에서 보이는 옆면은 아래쪽 두 변뿐이라 두 장만 그린다.
 // 뒤쪽 면은 어차피 자기 윗면에 가려진다.
-// 미리 깔린 판은 색이 다르다. 지울 수 없다는 것을 문구 없이 알리는 유일한
-// 표시다 — 지우개를 문질러 아무 일도 안 일어나는 것으로 배우게 두면
-// 그건 규칙이 아니라 고장으로 읽힌다. config 의 fixed* 참조.
-const skin = (fixed) => (fixed
-  ? { top: COLOR.fixedTop, right: COLOR.fixedRight, left: COLOR.fixedLeft }
-  : { top: COLOR.plateTop, right: COLOR.plateRight, left: COLOR.plateLeft });
-
 function drawPlateSides(ctx, x, y, z, fixed) {
   const t = PLATE_T * view.scale;
   const c = skin(fixed);
@@ -115,10 +115,6 @@ export function drawPlates(ctx) {
   const cells = cellList();
   cells.sort((a, b) => depthKey(a.x, a.y, a.z) - depthKey(b.x, b.y, b.z));
 
-  // 캐릭터는 서 있는 칸 바로 다음에 그린다. 따로 맨 뒤에 그리면 앞칸 판을
-  // 뚫고 보이고, 맨 앞에 그리면 자기가 선 판에 가려진다.
-  const actorAt = actorDepthCell();
-
   ctx.save();
 
   // 옆면을 전부 먼저, 윗면을 전부 나중에. 칸마다 한꺼번에 그리면 이음매가
@@ -142,11 +138,26 @@ export function drawPlates(ctx) {
   // 옆면은 앞칸 윗면이 있으면 덮이고 없으면 판의 가장자리로 남는다.
   // "이어져 보인다면 이어진 것이다" 를 화면 쪽에서 지키는 것이 이 두 줄이다.
   for (const c of cells) drawPlateSides(ctx, c.x, c.y, c.z, c.fixed);
+  for (const c of cells) drawPlateTop(ctx, c.x, c.y, c.z, c.fixed);
 
-  for (const c of cells) {
-    drawPlateTop(ctx, c.x, c.y, c.z, c.fixed);
-    if (actorAt && c.x === actorAt.x && c.y === actorAt.y) drawActor(ctx);
-  }
+  // 캐릭터는 판을 전부 그린 뒤에 그린다.
+  //
+  // 서 있는 칸 바로 다음에 그리고 있었다. 그러면 정렬에서 그 뒤에 오는 판이
+  // 캐릭터 위로 올라오는데, 올려 둔 판은 3z 만큼 뒤로 밀려 있어 웬만한 칸보다
+  // 늦게 그려진다. 그 판이 화면상 캐릭터 **위쪽** 자리에 있으면 — 캐릭터의
+  // 몸은 발끝에서 위로 뻗으므로 바로 그 자리를 지난다 — 몸통이 잘린다.
+  // 이음매 한 줄(6칸)을 올려 두고 재면 바닥 13칸에서 가려지고 그중 6칸은
+  // 머리까지 묻혔다. 최악이 80% 였다.
+  //
+  // 맨 뒤로 미뤄도 판을 뚫고 보이지 않는다. 캐릭터의 실루엣은 자기 칸의
+  // 한가운데에서 위로 솟은 좁은 기둥이라, 겹칠 수 있는 것은 화면상 위쪽 칸뿐이고
+  // 그것들은 캐릭터보다 뒤에 있는 판이다. 화면상 아래쪽(카메라 쪽) 판의 윗면은
+  // 캐릭터 발끝보다 아래에 있어 애초에 닿지 않는다.
+  //
+  // 같은 화면 자리에 더 높은 판이 겹치는 경우만 다르다. 그때는 캐릭터가 판
+  // 속에 들어가야 맞는데, 높이 조절은 actorVisible() 로 되돌리고 디렉터는
+  // 이음매의 화면 자리에 시작점을 두지 않으므로 그 상태 자체가 생기지 않는다.
+  drawActor(ctx);
 
   ctx.restore();
 }

@@ -310,27 +310,79 @@ function lay(cells) {
 }
 
 // ---------------------------------------------------------------------------
-// 6. 건너는 동안 캐릭터가 판에 묻히지 않는다
-//
-// 깊이 정렬에 캐릭터를 끼워 넣을 때 **떠나는 칸**에 얹으면, 도착할 칸이
-// 캐릭터보다 나중에 그려져 그 윗면이 캐릭터를 덮는다. 진짜 길에서는 두 칸의
-// depthKey 차이가 1 이라 발치가 조금 잘리는 정도지만, 착시 간선에서는 z 가
-// 한꺼번에 벌어져 차이가 3z 만큼 커지고 캐릭터가 머리만 남는다.
+// 6. 캐릭터는 판에 묻히지 않는다 — 서 있든, 건너든
 //
 // 자기 말이 어디 있는지 못 보면 게임이 성립하지 않고, 그 상태를 알려 줄 문구가
-// 이 게임에는 없다. 5단계에서 "캐릭터를 덮는 높이 조절을 되돌린다" 로 막은 것과
-// 같은 종류의 사고인데, 그때는 판을 올릴 때만 봤고 걸을 때는 못 봤다.
+// 이 게임에는 없다. 5단계에서 "캐릭터를 덮는 높이 조절을 되돌린다" 로 한 번
+// 막았는데, 그때는 **같은 화면 자리에 정확히 포개지는 경우**만 봤다.
+//
+// 정렬 키가 캐릭터를 묻는 경우가 따로 있었다.
+//
+//   depthKey = x + y + z = (화면 gx + gy) + 3z
+//
+// 올려 둔 판은 3z 만큼 뒤로 밀려 있어 웬만한 칸보다 늦게 그려진다. 캐릭터를
+// 서 있는 칸 바로 다음에 그리면, 그 판이 화면상 캐릭터 **위쪽** 자리에 있을 때
+// 몸통을 덮는다 — 몸은 발끝에서 위로 뻗으므로 바로 그 자리를 지난다.
+// 이음매 한 줄(6칸)에 바닥 13칸이 걸렸고 그중 6칸은 머리까지 묻혔다.
+//
+// 캐릭터를 판 다음에 그리는 것으로 이 부류가 통째로 없어진다.
 // ---------------------------------------------------------------------------
 {
-  // 몸통을 세로로 세 점 찍는다. 발치에서 두께(PLATE_T)만큼은 다음 판의 옆면이
-  // 정상적으로 스칠 수 있으므로 그보다 위를 본다.
+  // 몸통을 발끝 위에서 머리까지 훑는다. 이제는 한 점도 가려지면 안 된다.
   const bodyPoints = () => {
     const pos = actorScreenPos();
     if (!pos) return null;
     const s = view.scale;
     const foot = { x: pos.x, y: pos.y - PLATE_T * s };
-    return [0.5, 0.65, 0.8].map((f) => ({ x: foot.x, y: foot.y - ACTOR_H * s * f }));
+    return [0.2, 0.4, 0.6, 0.8, 0.95]
+      .map((f) => ({ x: foot.x, y: foot.y - ACTOR_H * s * f }));
   };
+
+  // --- 서 있을 때 — 올려 둔 판 주변 바닥을 전수로 ---
+  //
+  // 신고가 들어온 자리다. 이음매를 하나 올려 두고 캐릭터를 부지의 모든 빈 칸에
+  // 세워 본다. 어느 자리에서도 몸통이 한 점도 가려지면 안 된다.
+  for (const lift of [1, 3, 5, 8]) {
+    for (const horizontal of [true, false]) {
+      setStage({ zMax: Z_MAX, inkMax: 999, refund: 1,
+                 start: { x: 0, y: 0 }, goal: { x: 15, y: 15 }, fixtures: [] });
+      resetBoard();
+
+      const strip = [];
+      for (let k = 0; k < 6; k++) {
+        strip.push(horizontal
+          ? { x: lift + 2 + k, y: lift + 6 }
+          : { x: lift + 6, y: lift + 2 + k });
+      }
+      addPlate(strip, lift, { fixed: true });
+
+      const taken = new Set(strip.map((c) => key(c.x, c.y)));
+      let spots = 0;
+      let buried = 0;
+
+      for (let x = 0; x < GRID_W; x++) {
+        for (let y = 0; y < GRID_H; y++) {
+          if (taken.has(key(x, y))) continue;
+          const pad = addPlate([{ x, y }], 0);
+          placeActor(x, y);
+          spots++;
+
+          const ctx = painter();
+          drawPlates(ctx);
+          const pts = bodyPoints();
+          if (pts && !pts.every((p) => ctx.colorAt(p.x, p.y) === COLOR.actor)) buried++;
+
+          board.plates.splice(board.plates.indexOf(pad), 1);
+          board.occupied.delete(key(x, y));
+        }
+      }
+
+      check(`서 있을 때 — 이음매 z=${lift} ${horizontal ? '가로' : '세로'}`,
+            buried === 0, `${buried}/${spots}칸`);
+    }
+  }
+
+  // --- 건널 때 ---
 
   function crossing(name, plates, actorAt, dest) {
     setStage({ zMax: Z_MAX, inkMax: 999, refund: 1,
