@@ -657,6 +657,112 @@ export function drawLogo(ctx, viewW, viewH) {
   ctx.restore();
 }
 
+// 리셋 예고. 상단 중앙.
+//
+// 더 갈 수 없게 된 도면은 다시 뜨는데, 지금까지는 아무 예고 없이 넘어갔다.
+// 문구가 없는 게임에서 화면이 갑자기 갈리면 무엇 때문인지 알 방법이 없고,
+// 무엇보다 **아직 되돌릴 수 있다는 것**을 못 알린다. 세는 동안 한 획이라도
+// 그으면 막힘 판정이 풀려 예고가 그대로 취소된다(main.js 의 stuckFor).
+//
+// 자리는 조작 안내와 층 번호의 윗변에 맞춘 상단 중앙이다. 셋이 한 줄에 놓이면
+// 새 자리를 만든 것이 아니라 원래 있던 띠에 얹은 것이 되고, 도면 위가 아니므로
+// "도면 위에는 문구를 두지 않는다" 와도 부딪히지 않는다.
+//
+// 문구는 두 단이다. 이유를 먼저 말하고 나머지는 센다.
+//
+//   5초 남음   NO ROUTE        왜 넘어가는지
+//   4초 남음   NO ROUTE
+//   3초 남음   RESHEET IN 3
+//   2초 남음   RESHEET IN 2
+//   1초 남음   RESHEET IN 1
+//
+// 이 게임에서 이유를 말하는 유일한 자리다. 한 초만 주었더니 너무 빨리
+// 지나갔다 — 읽고 뜻을 새길 틈이 없으면 안 적은 것과 같다. 그렇다고 계속
+// 띄워 두면 읽을 것이 늘어 손을 움직일 시간을 뺏으므로 두 초로 잘랐다.
+// 그동안에도 초마다 다시 깜박이므로 멈춘 것으로 보이지는 않는다.
+const NOTICE_REASON = 'NO ROUTE';
+const NOTICE_COUNT = (n) => `RESHEET IN ${n}`;
+
+// 카운트가 시작하는 수, 그리고 그 앞에 이유가 머무는 초.
+//
+// 둘을 내보내는 이유는 config.STUCK_PAUSE 와 맞물려야 하기 때문이다. 대기가
+// 이 둘의 합보다 짧으면 카운트가 큰 수부터 건너뛰거나 이유를 띄울 초가
+// 사라진다. 실제로 그렇게 어긋난 적이 있다 — 대기가 3 이던 시절에는 이유와
+// 카운트가 한 초를 나눠 써서 3 을 못 세고 2 부터 시작했다.
+// 그 관계를 검사가 직접 본다(hud 묶음).
+export const NOTICE_COUNT_FROM = 3;
+export const NOTICE_REASON_SECS = 2;
+
+// 켜져 있는 몫. 한 초를 이만큼 켜고 나머지를 잦아든 채로 둔다.
+// 완전히 끄지 않는 것은 깜박임이 "사라졌다 나타남" 이 아니라 "숨쉬는 것" 으로
+// 읽혀야 하기 때문이다 — 사라지는 것은 이미 끝난 것으로 보인다.
+const NOTICE_ON = 0.58;
+
+// 상자 폭은 가장 긴 문구에 고정한다.
+//
+// 다른 상자들은 글자 폭에서 끌어오는데, 그것은 그쪽 문구가 안 바뀌기 때문이다.
+// 여기는 초마다 바뀌므로 같은 방식을 쓰면 상자가 늘었다 줄어, 깜박임이 아니라
+// 덜컹거림으로 보인다. 예외가 아니라 같은 원리의 다른 결과다.
+function noticeWidth(ctx) {
+  let w = ctx.measureText(NOTICE_REASON).width;
+  // 셀 수를 전부 재 둔다. 지금은 한 자리뿐이라 서로 같지만, 세는 수를 늘리면
+  // 두 자리가 섞이므로 그때 폭을 다시 손대야 하는 자리를 안 남긴다.
+  for (let n = 1; n <= NOTICE_COUNT_FROM; n++) {
+    w = Math.max(w, ctx.measureText(NOTICE_COUNT(n)).width);
+  }
+  return w;
+}
+
+// remain 은 남은 초다. 0 이하면 아무것도 그리지 않는다.
+//
+// 문구도 깜박임도 전부 이 값 하나에서 나온다. 상태를 따로 들지 않으므로
+// 검사가 시간을 넣어 프레임을 직접 만들 수 있다 — drawSheetNo 가 층 번호
+// 하나만 받는 것과 같은 규율이다.
+export function drawResetNotice(ctx, viewW, remain) {
+  if (!(remain > 0)) return;
+
+  const secs = Math.ceil(remain);
+  const text = secs > NOTICE_COUNT_FROM ? NOTICE_REASON : NOTICE_COUNT(secs);
+
+  // 한 초 안에서의 위치. 초가 바뀌는 순간마다 다시 켜진다.
+  //
+  // remain 은 **줄어드는** 값이라 소수부가 1 에서 0 으로 간다. 새 문구가 뜨는
+  // 순간이 소수부 1 쪽이므로 문턱을 그쪽에 두어야 한다. 처음에 0 쪽에 두었다가
+  // 문구가 바뀌는 순간이 잦아든 상태가 됐다 — 눈에 드는 것은 끝이 움직이는
+  // 것이라던 게이지와 같은 얘기로, 바뀌는 순간이 가장 밝아야 한다.
+  const frac = remain - Math.floor(remain);
+  const lit = frac > 1 - NOTICE_ON ? 1 : 0.25;
+
+  ctx.save();
+  ctx.font = hudFont(13);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const pad = HUD.pad + 3;
+  const bw = Math.round(noticeWidth(ctx) + pad * 2);
+  const bh = HUD.fontPx + pad * 2 - 4;
+
+  const bx = Math.round(viewW / 2 - bw / 2);
+  const by = VIEW_MARGIN;                   // 조작 안내·층 번호와 윗변이 맞는다
+
+  // hudPanel 을 그대로 쓰지 않는다. 저쪽은 언제나 같은 진하기인데 이것은
+  // 깜박이므로, 같은 값에 위상을 곱한다.
+  ctx.fillStyle = COLOR.bg;
+  ctx.globalAlpha = 0.72 * (0.55 + 0.45 * lit);
+  ctx.fillRect(bx, by, bw, bh);
+
+  ctx.strokeStyle = COLOR.gridEdge;
+  ctx.globalAlpha = 0.5 * lit;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(bx - 0.5, by - 0.5, bw + 1, bh + 1);
+
+  ctx.globalAlpha = 0.35 + 0.65 * lit;
+  ctx.fillStyle = COLOR.plateTop;
+  ctx.fillText(text, viewW / 2, by + bh / 2 + 0.5);
+
+  ctx.restore();
+}
+
 // 커서가 가리키는 칸. 스타일러스 끝이 닿은 자리라는 뜻으로 앰버.
 //
 // 이 하이라이트는 연출이기 이전에 좌표계 검증 도구다.

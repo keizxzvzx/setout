@@ -1,5 +1,6 @@
 // SETOUT — 진입점
 
+import { STUCK_PAUSE } from './config.js';
 import { fitView, view, setView } from './iso.js';
 import { board } from './board.js';
 import { updateActor } from './actor.js';
@@ -7,6 +8,7 @@ import { session, beginRun, beginFlip, updateFlip, flip, isStuck } from './sessi
 import {
   clear, drawFloor, drawFootprints, drawGoal, drawPlates,
   drawStroke, drawHoverCell, drawInkGauge, drawControls, drawSheetNo, drawLogo,
+  drawResetNotice,
 } from './render.js';
 import { pointer, attachPointer, abortGesture, resyncPointer } from './input.js';
 
@@ -20,9 +22,9 @@ let viewH = 0;
 const CLEAR_PAUSE = 0.8;
 let clearedFor = 0;
 
-// 못 쓰게 된 도면을 다시 뜨기까지. 이만큼 계속 막혀 있어야 움직인다.
-// 손을 놓고 잠깐 두었을 때만 반응해야, 지우는 중에 도면이 넘어가지 않는다.
-const STUCK_PAUSE = 0.9;
+// 못 쓰게 된 도면을 다시 뜨기까지. 손을 놓고 잠깐 두었을 때만 반응해야,
+// 지우는 중에 도면이 넘어가지 않는다. 값과 그 근거는 config.STUCK_PAUSE —
+// 화면에 남은 초를 적는 쪽과 같은 값을 봐야 해서 저기 있다.
 let stuckFor = 0;
 
 function resize() {
@@ -123,6 +125,13 @@ function frame(now) {
   drawControls(ctx);
   drawSheetNo(ctx, viewW, session.stages + 1);
   drawLogo(ctx, viewW, viewH);
+
+  // 리셋 예고도 같은 띠에 얹힌다.
+  //
+  // 막혀 있는 동안에만 띄운다 — stuckFor 는 막힘이 풀리는 순간 0 이 되므로
+  // 그 자체가 조건이다. 넘어가는 중에도 안 띄운다. 이미 넘어가고 있는데
+  // 곧 넘어간다고 말하는 것은 뜻이 없다.
+  if (stuckFor > 0 && !flip.on) drawResetNotice(ctx, viewW, STUCK_PAUSE - stuckFor);
 
   requestAnimationFrame(frame);
 }
