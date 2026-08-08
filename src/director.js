@@ -657,8 +657,15 @@ export function verify(candidate, inkMax, opts = {}) {
   const floorCells = floor / INK_COST;
 
   if (floorCells < minCells) {
+    // 무엇으로 쟀는지를 문구가 말해야 한다. 그리기로 못 가는 층에서도 "그냥
+    // 그려도 7칸" 이라고 적고 있었는데, 그 7칸은 착시로 갈 때의 값이다.
+    // 판정은 맞고 설명만 뒤처진 것이라 화면에는 증상이 없지만, 이 기록이
+    // 제출물 4번의 증거라서 읽는 사람이 값과 문구를 대조하면 어긋난다.
     return out('TOO_SHALLOW',
-      `그냥 그려도 ${floorCells}칸이면 닿는다. 층이라고 할 것이 없다.`,
+      honest
+        ? `그냥 그려도 ${floorCells}칸이면 닿는다. 층이라고 할 것이 없다.`
+        : `그리기로는 못 가지만 착시로 ${floorCells}칸이면 닿는다. ` +
+          `층이라고 할 것이 없다.`,
       redesignFix(`목표를 밀어낸다 — 그리기로 최소 ${minCells}칸.`));
   }
 
