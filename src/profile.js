@@ -78,12 +78,36 @@ export function profileOf(stats, context = {}) {
 const SWITCH_TO_HONEST = 0.7;
 const SWITCH_TO_ILLUSION = 0.3;
 
+// --- 익히는 판 -------------------------------------------------------------
+//
+// 구조물을 얼마나 얹을 것인가는 **몇 장째인가**가 정한다. 성향이 아니다.
+//
+// 지금까지는 아무도 이것을 쥐고 있지 않아서 복잡도가 의도에 딸려 왔다.
+// 실측하면 이렇게 나왔다.
+//
+//   illusion / open   구조물 1개 / 5~7칸
+//   honest            구조물 6~7개 / 23~30칸
+//
+// 착시파로 읽히면 두 장째부터 여섯 개짜리 빽빽한 판을 받고, 다리파로 읽히면
+// 여섯 장째까지 구조물이 하나뿐이었다. **익히는 판은 누가 플레이하든 익히는
+// 판이어야 하고**, 다 자란 판도 마찬가지다. 시트 번호가 눌러야 그것이 성립한다.
+//
+// stages 는 끝낸 층 수라 시트 번호보다 하나 작다. stages 1 이 시트 2 다.
+const LEARNING_STAGES = 1;
+
+// 0 이 익히는 판, 1 이 다 자란 판. 사이 단계를 두지 않는 것은 시트 3부터
+// 바로 다 자란 판을 보고 싶다는 요구가 있었기 때문이다 — 완만하게 올리면
+// 그 판이 다섯 장째에나 온다.
+export const depthOf = (stages) => (stages <= LEARNING_STAGES ? 0 : 1);
+
 export function briefFor(profile, opts = {}) {
   const { zMax = Z_MAX } = opts;
 
+  const depth = depthOf(profile.stages);
+
   if (!profile.stages) {
     return {
-      brief: { intent: 'open', zMax },
+      brief: { intent: 'open', zMax, depth },
       slack: 0.5,
       note: '아직 읽을 것이 없다. 둘 다 갈 수 있는 층을 내고 무엇을 고르는지 본다.',
     };
@@ -127,8 +151,9 @@ export function briefFor(profile, opts = {}) {
     : `배급의 ${pct(profile.pressure)}% 를 썼다. 여유는 남겨 둔다.`;
 
   return {
-    brief: { intent, zMax },
+    brief: { intent, zMax, depth },
     slack,
-    note: `${profile.stages}층째 — ${why} ${how}`,
+    note: `${profile.stages}층째 — ${why} ${how}` +
+          (depth ? '' : ' 아직 익히는 판이라 구조물은 적게 둔다.'),
   };
 }
