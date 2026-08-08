@@ -161,7 +161,16 @@ export function cellList() {
   for (const p of board.plates) {
     // fixed 를 같이 실어 낸다. 막힘 판정이 "되받을 수 있는 잉크" 를 셀 때
     // 플레이어가 그린 칸과 미리 깔린 칸을 갈라야 한다(session.isStuck).
-    for (const c of p.cells) out.push({ x: c.x, y: c.y, z: p.z, fixed: p.fixed });
+    //
+    // stepped 도 같이 낸다. 렌더가 밟은 칸을 다른 색으로 그려야 하는데,
+    // board.stepped 를 render 가 직접 읽으면 같은 사실을 보는 곳이 늘어난다.
+    for (const c of p.cells) {
+      out.push({
+        x: c.x, y: c.y, z: p.z,
+        fixed: p.fixed,
+        stepped: board.stepped.has(key(c.x, c.y)),
+      });
+    }
   }
   return out;
 }
@@ -211,6 +220,33 @@ export function movePlate(plate, dz) {
 // 게이지는 확정 잉크와 이번 획이 먹을 몫을 따로 그릴 수 있다.
 export function inkAvailable() {
   return board.ink - board.stroke.size * INK_COST;
+}
+
+// 지금 지워서 되받을 수 있는 잉크.
+//
+// 게이지가 이 값을 한 겹 더 그린다. 걸어서 확인해 본 다리는 환급이 0 이 되므로
+// (INK_REFUND_STEPPED), 그 순간 이 값이 뚝 떨어진다 — 화면에서 무슨 일이
+// 일어났는지 알 수 있는 자리가 여기뿐이다. 그 전에는 잉크가 한 방울도 안 줄고
+// 판도 그대로라, 플레이어에게는 나중에 지웠는데 게이지가 안 차는 것으로만 보였다.
+//
+// 고정 구조물은 뺀다. 애초에 지울 수 없고 잉크를 낸 적도 없다.
+// 환급이 배급량을 못 넘는 것도 여기서 같이 잘라 준다 — board.erase 가
+// Math.min(stage.inkMax, ...) 로 자르므로 게이지가 그보다 길면 거짓말이 된다.
+//
+// session.isStuck 이 같은 값을 쓴다. 두 곳에서 따로 세면 화면이 "아직 된다" 고
+// 하는데 판정은 막혔다고 하는 상태가 나온다.
+export function inkRecoverable() {
+  let sum = 0;
+
+  for (const p of board.plates) {
+    if (p.fixed) continue;
+    for (const c of p.cells) {
+      if (board.stepped.has(key(c.x, c.y))) continue;
+      sum += stage.refund;
+    }
+  }
+
+  return Math.min(sum, stage.inkMax - board.ink);
 }
 
 // 획을 잇는 기준. 대각을 포함한다.

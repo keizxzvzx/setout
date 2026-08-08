@@ -113,5 +113,75 @@ B.extendStroke(cell(4, 1));                       // 같은 자리를 덧그음
 B.commitStroke();
 check('점유 칸 덧긋기는 공짜', B.board.ink === before, `${before} → ${B.board.ink}`);
 
+// ---------------------------------------------------------------------------
+// 게이지가 되받을 수 있는 잉크를 보여 주는가
+//
+// 이 묶음에서 제일 중요한 항목이다. 밟은 칸은 환급이 0 이라(2·4단계) 잘못 그은
+// 다리를 걸어서 확인해 본 순간 되받을 잉크가 사라지는데, 잉크도 안 줄고 판도
+// 그대로여서 **화면에서 아무 일도 일어나지 않았다.** 나중에 지웠을 때 게이지가
+// 안 차는 것으로만 알 수 있고, 그때는 이미 층이 끝나 있다.
+//
+// 그래서 게이지에 겹을 하나 더 얹었다. 여기가 안 움직이면 그 신호가 없는 것이고,
+// 없으면 도면 교체가 규칙이 아니라 고장으로 읽힌다.
+{
+  const A = await import('../src/actor.js');
+  const { drawInkGauge } = await import('../src/render.js');
+  const { fitView } = await import('../src/iso.js');
+  const { buildStage } = await import('../src/session.js');
+
+  fitView(1489, 863);
+
+  // 채워진 가로 막대만 걷어 낸다. 게이지는 fillRect 로만 그린다.
+  const bars = () => {
+    const out = [];
+    const ctx = {
+      save: () => {}, restore: () => {},
+      set fillStyle(v) {}, set strokeStyle(v) {}, set lineWidth(v) {},
+      set globalAlpha(v) { out.alpha = v; },
+      strokeRect: () => {},
+      fillRect: (x, y, w) => out.push(Math.round(w * 10) / 10),
+    };
+    drawInkGauge(ctx, 1489, 863);
+    return out;
+  };
+
+  buildStage({ start: { x: 3, y: 8 }, goal: { x: 12, y: 8 }, inkMax: 40, zMax: 8, fixtures: [] });
+
+  const flat = bars();
+  check('아무것도 안 그렸으면 되받을 것도 없다', flat[0] === flat[1],
+        `${flat[0]} / ${flat[1]}`);
+
+  // 다리를 넷 긋는다 — 아직 안 밟았으므로 전부 되받을 수 있다
+  B.beginStroke(cell(4, 8));
+  B.extendStroke(cell(7, 8));
+  B.commitStroke();
+
+  const drawn = bars();
+  check('그은 만큼 게이지가 줄었다', drawn[1] < flat[1], `${flat[1]} → ${drawn[1]}`);
+  check('되받을 수 있는 겹이 그 위에 남는다', drawn[0] > drawn[1],
+        `바깥 ${drawn[0]} / 확정 ${drawn[1]}`);
+
+  // 그 위를 걸어간다. 잉크는 한 방울도 안 줄어든다.
+  const inkBefore = B.board.ink;
+  A.walkTo(7, 8);
+  A.updateActor(10);
+
+  const walked = bars();
+  check('걸어도 확정 잉크는 그대로', B.board.ink === inkBefore, `${B.board.ink}`);
+  check('확정 겹도 그대로다', walked[1] === drawn[1], `${drawn[1]} → ${walked[1]}`);
+  check('**바깥 겹만 짧아진다** — 이것이 없던 신호다', walked[0] < drawn[0],
+        `${drawn[0]} → ${walked[0]}`);
+
+  // 지워 보면 게이지가 말한 만큼만 돌아온다. 화면과 회계가 갈리면 안 된다.
+  const recoverable = B.inkRecoverable();
+  const before = B.board.ink;
+  for (let x = 4; x <= 7; x++) B.beginErase(cell(x, 8));
+  B.commitErase();
+  check('게이지가 말한 만큼 실제로 돌아온다', B.board.ink === before + recoverable,
+        `${before} + ${recoverable} → ${B.board.ink}`);
+
+  B.board.actor = null;
+}
+
 console.log(fail ? `\n${fail}건 실패` : '\n전부 통과');
 process.exit(fail ? 1 : 0);

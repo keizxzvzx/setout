@@ -9,7 +9,7 @@
 // 화면에는 한참 뒤에야 증상이 나온다.
 
 import { stage, setStage } from './stage.js';
-import { board, key, addPlate, resetBoard, cellList } from './board.js';
+import { board, key, addPlate, resetBoard, cellList, inkRecoverable } from './board.js';
 import { placeActor, actorCell } from './actor.js';
 import { refit } from './iso.js';
 import { minInk } from './solver.js';
@@ -143,14 +143,9 @@ export function isStuck() {
   const need = minInk(cells, from, board.goal);
   if (!need) return true;               // 길 자체가 없다
 
-  let refundable = 0;
-  for (const c of cells) {
-    if (c.fixed) continue;
-    if (board.stepped.has(key(c.x, c.y))) continue;
-    refundable += stage.refund;
-  }
-
-  return need.cost > board.ink + refundable;
+  // 게이지가 그리는 값과 같은 것을 쓴다. 따로 세면 화면은 "아직 된다" 고
+  // 하는데 판정은 막혔다고 하는 상태가 나온다.
+  return need.cost > board.ink + inkRecoverable();
 }
 
 // 같은 층을 다시 뜬다. 새로 만들지 않는다 — 플레이어가 풀려던 층이 이것이고,

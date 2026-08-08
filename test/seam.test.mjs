@@ -504,6 +504,62 @@ function lay(cells) {
         COLOR.fixedTop !== COLOR.amber && COLOR.fixedTop !== COLOR.actor
         && COLOR.fixedRight !== COLOR.actor && COLOR.fixedLeft !== COLOR.actor);
 
+  // --- 밟은 칸도 갈린다 -----------------------------------------------------
+  //
+  // 지울 수는 있는데 잉크가 한 방울도 안 돌아온다. 미리 깔린 판과 같은 종류의
+  // 문제라 같은 방법으로 푼다 — 표시가 없으면 지워 보고 게이지가 안 차는
+  // 것으로만 알 수 있고, 그때는 이미 늦다.
+  //
+  // 한 다리에 밟은 칸과 안 밟은 칸이 섞여 있는 것이 이 게임의 보통 상태이므로
+  // **같은 판 안에서** 갈리는지를 본다.
+  {
+    setStage({ zMax: Z_MAX, inkMax: 999, refund: 1,
+               start: { x: 3, y: 8 }, goal: { x: 15, y: 15 }, fixtures: [] });
+    resetBoard();
+    board.actor = null;
+
+    addPlate([{ x: 3, y: 8 }], 0, { fixed: true });                 // 시작 발판
+    addPlate([{ x: 5, y: 8 }, { x: 6, y: 8 }, { x: 7, y: 8 }], 0);  // 한 장의 다리
+    board.stepped.add(key(5, 8));
+    board.stepped.add(key(6, 8));
+
+    // 옆면을 재려면 이웃이 없어야 한다. 줄 안의 칸은 옆면이 앞칸 윗면에 덮여
+    // 있다 — 그것이 이 묶음 1번이 지키는 성질이다.
+    addPlate([{ x: 11, y: 4 }], 0);
+    board.stepped.add(key(11, 4));
+
+    const c2 = painter();
+    drawPlates(c2);
+    const top = (x, y) => c2.colorAt(topCenter({ x, y, z: 0 }).x, topCenter({ x, y, z: 0 }).y);
+
+    check('같은 판 안에서 밟은 칸이 갈린다',
+          top(5, 8) === COLOR.steppedTop && top(6, 8) === COLOR.steppedTop,
+          `${top(5, 8)} / ${top(6, 8)}`);
+    check('안 밟은 칸은 그대로 강철', top(7, 8) === COLOR.plateTop, `${top(7, 8)}`);
+
+    const sd = (x, y, dx) => {
+      const c = topCenter({ x, y, z: 0 });
+      return c2.colorAt(c.x + dx * (C_TILE_W / 4) * view.scale,
+                        c.y + (C_TILE_H / 4) * view.scale + T() / 2);
+    };
+    check('밟은 칸은 옆면도 갈린다',
+          sd(11, 4, -1) === COLOR.steppedLeft && sd(11, 4, 1) === COLOR.steppedRight,
+          `${sd(11, 4, -1)} / ${sd(11, 4, 1)}`);
+
+    // 시작 발판은 밟은 칸이기도 하고 미리 깔린 판이기도 하다. 거기서 알아야 할
+    // 것은 "지워지지 않는다" 쪽이므로 fixed 가 이긴다.
+    check('시작 발판은 미리 깔린 판으로 남는다', top(3, 8) === COLOR.fixedTop,
+          `${top(3, 8)}`);
+
+    // 세 색이 서로 달라야 셋을 가른 뜻이 있다. 그리고 밟은 칸은 미리 깔린 판과
+    // 반대 방향으로 가야 한다 — 하나는 청사진 쪽, 하나는 그늘 쪽이다.
+    check('강철·미리깔림·밟음이 전부 다른 색',
+          new Set([COLOR.plateTop, COLOR.fixedTop, COLOR.steppedTop]).size === 3);
+    check('밟은 칸은 앰버도 코발트도 아니다',
+          COLOR.steppedTop !== COLOR.amber && COLOR.steppedTop !== COLOR.actor
+          && COLOR.steppedLeft !== COLOR.actor && COLOR.steppedRight !== COLOR.actor);
+  }
+
   // 이음매 규칙은 색과 무관해야 한다. 미리 깔린 판과 내가 그은 판이 붙는
   // 자리가 이 게임의 대부분이므로 여기서 단이 지면 1번이 무의미해진다.
   resetBoard();

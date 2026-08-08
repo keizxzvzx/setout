@@ -5,11 +5,11 @@
 
 import {
   GRID_W, GRID_H, PLATE_T, VIEW_MARGIN,
-  TILE_W, TILE_H, ACTOR_R, ACTOR_H, ACTOR_W, COLOR,
+  TILE_W, TILE_H, ACTOR_R, ACTOR_H, ACTOR_W, COLOR, GAUGE,
 } from './config.js';
 import { stage } from './stage.js';
 import { worldToScreen, tileDiamond, depthKey, view } from './iso.js';
-import { board, parseKey, inkAvailable, cellList } from './board.js';
+import { board, parseKey, inkAvailable, inkRecoverable, cellList } from './board.js';
 import { actorScreenPos } from './actor.js';
 
 export function clear(ctx, w, h) {
@@ -68,9 +68,18 @@ function polygon(ctx, pts) {
 // 미리 깔린 판은 색이 다르다. 지울 수 없다는 것을 문구 없이 알리는 유일한
 // 표시다 — 지우개를 문질러 아무 일도 안 일어나는 것으로 배우게 두면
 // 그건 규칙이 아니라 고장으로 읽힌다. config 의 fixed* 참조.
-const skin = (fixed) => (fixed
-  ? { top: COLOR.fixedTop, right: COLOR.fixedRight, left: COLOR.fixedLeft }
-  : { top: COLOR.plateTop, right: COLOR.plateRight, left: COLOR.plateLeft });
+//
+// 밟은 판도 색이 다르다. 지울 수는 있지만 잉크가 한 방울도 안 돌아온다
+// (INK_REFUND_STEPPED). 같은 이유다 — 지워 보고 게이지가 안 차는 것으로
+// 배우게 두면 규칙이 아니라 고장으로 읽힌다.
+//
+// 미리 깔린 판보다 우선한다. 시작 발판은 둘 다 해당하는데, 거기서 알아야 할
+// 것은 "지워지지 않는다" 쪽이므로 fixed 를 먼저 본다.
+const skin = (fixed, stepped) => {
+  if (fixed) return { top: COLOR.fixedTop, right: COLOR.fixedRight, left: COLOR.fixedLeft };
+  if (stepped) return { top: COLOR.steppedTop, right: COLOR.steppedRight, left: COLOR.steppedLeft };
+  return { top: COLOR.plateTop, right: COLOR.plateRight, left: COLOR.plateLeft };
+};
 
 // 칸 하나를 두께 있는 철판으로 그린다.
 //
@@ -85,9 +94,9 @@ const skin = (fixed) => (fixed
 // 마름모 꼭짓점은 위 → 오른쪽 → 아래 → 왼쪽 순.
 // 화면에서 보이는 옆면은 아래쪽 두 변뿐이라 두 장만 그린다.
 // 뒤쪽 면은 어차피 자기 윗면에 가려진다.
-function drawPlateSides(ctx, x, y, z, fixed) {
+function drawPlateSides(ctx, x, y, z, fixed, stepped) {
   const t = PLATE_T * view.scale;
-  const c = skin(fixed);
+  const c = skin(fixed, stepped);
   const base = tileDiamond(x, y, z);
   const top = base.map((p) => ({ x: p.x, y: p.y - t }));
 
@@ -101,9 +110,9 @@ function drawPlateSides(ctx, x, y, z, fixed) {
 }
 
 // 걷는 면. 두께만큼 올라가 있다.
-function drawPlateTop(ctx, x, y, z, fixed) {
+function drawPlateTop(ctx, x, y, z, fixed, stepped) {
   const t = PLATE_T * view.scale;
-  ctx.fillStyle = skin(fixed).top;
+  ctx.fillStyle = skin(fixed, stepped).top;
   polygon(ctx, tileDiamond(x, y, z).map((p) => ({ x: p.x, y: p.y - t })));
   ctx.fill();
 }
@@ -137,8 +146,8 @@ export function drawPlates(ctx) {
   // 두 벌로 나누면 윗면끼리는 서로 파고들 일이 없고(마름모는 정확히 맞물린다)
   // 옆면은 앞칸 윗면이 있으면 덮이고 없으면 판의 가장자리로 남는다.
   // "이어져 보인다면 이어진 것이다" 를 화면 쪽에서 지키는 것이 이 두 줄이다.
-  for (const c of cells) drawPlateSides(ctx, c.x, c.y, c.z, c.fixed);
-  for (const c of cells) drawPlateTop(ctx, c.x, c.y, c.z, c.fixed);
+  for (const c of cells) drawPlateSides(ctx, c.x, c.y, c.z, c.fixed, c.stepped);
+  for (const c of cells) drawPlateTop(ctx, c.x, c.y, c.z, c.fixed, c.stepped);
 
   // 캐릭터는 판을 전부 그린 뒤에 그린다.
   //
@@ -334,6 +343,10 @@ export function drawInkGauge(ctx, viewW, viewH) {
   const committed = Math.max(0, board.ink) / stage.inkMax;
   const available = Math.max(0, inkAvailable()) / stage.inkMax;
 
+  // 가장 바깥 겹. 지금 지울 수 있는 것을 전부 지웠다고 쳤을 때의 잉크다.
+  // 걸어서 확인해 본 다리는 환급이 0 이라, 걸어간 순간 이 끝이 짧아진다.
+  const recoverable = committed + Math.max(0, inkRecoverable()) / stage.inkMax;
+
   ctx.save();
 
   ctx.strokeStyle = COLOR.gridEdge;
@@ -342,10 +355,15 @@ export function drawInkGauge(ctx, viewW, viewH) {
   ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
 
   ctx.fillStyle = COLOR.amber;
-  ctx.globalAlpha = 0.3;
+
+  // 바깥에서 안으로. 뒤에 그린 것이 앞의 것을 덮으므로 진해지는 순서다.
+  ctx.globalAlpha = GAUGE.recoverable;
+  ctx.fillRect(x, y, w * recoverable, h);
+
+  ctx.globalAlpha = GAUGE.committed;
   ctx.fillRect(x, y, w * committed, h);
 
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = GAUGE.available;
   ctx.fillRect(x, y, w * available, h);
 
   ctx.restore();
