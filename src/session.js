@@ -133,20 +133,30 @@ export function nextStage({ log = true } = {}) {
 // 18 / 세어 준 환급 6 이라 "안 막힘" 이 나왔는데, 그 6 은 전부 구조물이라
 // 지울 수가 없었다. 구조물 6칸을 지우는 64가지를 전부 돌려 봐도 풀리는 경우가
 // 없었고, 화면은 그대로 멈춰 있었다.
-export function isStuck() {
-  if (board.cleared || flip.on || !board.goal) return false;
+// 원인을 갈라 돌려준다. 리셋 예고가 이유를 말하는 유일한 자리인데(render),
+// 길이 없는 것과 잉크가 모자란 것을 한 마디로 뭉뚱그리면 잉크를 아끼면 됐을
+// 사람이 길이 없었다고 배운다. 같은 판정이 이미 둘을 갈라 알고 있으므로
+// 새로 계산하는 것이 아니라 알던 것을 버리지 않는 것이다.
+//
+//   null          막히지 않았다
+//   'NO_ROUTE'    어떤 잉크로도 이을 길이 없다
+//   'OUT_OF_INK'  길은 있는데 지울 것을 다 지워 되받아도 최소 해법에 못 미친다
+export function stuckReason() {
+  if (board.cleared || flip.on || !board.goal) return null;
 
   const from = actorCell();
-  if (!from) return false;
+  if (!from) return null;
 
   const cells = cellList();
   const need = minInk(cells, from, board.goal);
-  if (!need) return true;               // 길 자체가 없다
+  if (!need) return 'NO_ROUTE';         // 길 자체가 없다
 
   // 게이지가 그리는 값과 같은 것을 쓴다. 따로 세면 화면은 "아직 된다" 고
   // 하는데 판정은 막혔다고 하는 상태가 나온다.
-  return need.cost > board.ink + inkRecoverable();
+  return need.cost > board.ink + inkRecoverable() ? 'OUT_OF_INK' : null;
 }
+
+export function isStuck() { return stuckReason() !== null; }
 
 // 같은 층을 다시 뜬다. 새로 만들지 않는다 — 플레이어가 풀려던 층이 이것이고,
 // 실패했다고 다른 문제를 내밀면 방금까지 읽던 것이 무의미해진다.

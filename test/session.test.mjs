@@ -14,7 +14,7 @@ import { verify, candidateCells } from '../src/director.js';
 import { isIllusion } from '../src/path.js';
 import {
   session, beginRun, nextStage, buildStage, beginFlip, updateFlip, flip, FLIP_TIME,
-  isStuck, redealStage,
+  isStuck, stuckReason, redealStage,
 } from '../src/session.js';
 
 let fail = 0;
@@ -313,9 +313,28 @@ const B_draw = (cells) => {
   for (const c of spur) board.stepped.add(key(c.x, c.y));
   check('밟은 칸뿐이면 막힌 것', isStuck() === true);
 
+  // 원인이 갈린다. 리셋 예고가 이유를 말하는 유일한 자리라(render),
+  // 잉크가 모자란 것을 길이 없다고 적으면 그 자리가 거짓말을 한다.
+  check('원인은 잉크다 — 길은 있는데 되받을 것이 없다',
+        stuckReason() === 'OUT_OF_INK', `${stuckReason()}`);
+
   check('클리어한 층은 막혔다고 하지 않는다',
         (board.cleared = true, isStuck() === false));
   board.cleared = false;
+
+  // 길 자체가 없는 것은 다른 원인이다. 목표의 화면 자리를 뜬판이 덮으면
+  // 그리기는 언제나 z=0 이라(1단계) 도착할 방법 자체가 사라진다.
+  // (7,5) 를 z=2 로 띄우면 화면에서 (5,3) — 목표 자리에 선다.
+  buildStage({
+    start: { x: 3, y: 3 }, goal: { x: 5, y: 3 }, inkMax: 20, zMax: 8,
+    fixtures: [{ cells: [{ x: 7, y: 5 }], z: 2 }],
+  });
+  check('목표가 덮이면 길 자체가 없는 것',
+        stuckReason() === 'NO_ROUTE', `${stuckReason()}`);
+  check('막힌 것이기도 하다 — 원인만 다르다', isStuck() === true);
+  check('안 막힌 판에는 원인이 없다',
+        (buildStage({ start: { x: 3, y: 3 }, goal: { x: 5, y: 3 }, inkMax: 20, zMax: 8 }),
+         stuckReason() === null), `${stuckReason()}`);
 }
 
 // ---------------------------------------------------------------------------

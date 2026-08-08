@@ -4,7 +4,7 @@ import { STUCK_PAUSE } from './config.js';
 import { fitView, view, setView } from './iso.js';
 import { board } from './board.js';
 import { updateActor } from './actor.js';
-import { session, beginRun, beginFlip, updateFlip, flip, isStuck } from './session.js';
+import { session, beginRun, beginFlip, updateFlip, flip, stuckReason } from './session.js';
 import {
   clear, drawFloor, drawFootprints, drawGoal, drawPlates,
   drawStroke, drawHoverCell, drawInkGauge, drawControls, drawSheetNo, drawLogo,
@@ -79,7 +79,8 @@ function frame(now) {
   // 손을 놓고 있을 때만 본다. 긋거나 지우는 중에는 아직 판단이 안 끝난 상태라
   // 그때 도면이 넘어가면 플레이어가 하던 일을 뺏긴다.
   const idle = !pointer.mode && !board.actor?.path;
-  stuckFor = idle && isStuck() ? stuckFor + dt : 0;
+  const stuck = idle ? stuckReason() : null;
+  stuckFor = stuck ? stuckFor + dt : 0;
 
   if (stuckFor >= STUCK_PAUSE) {
     stuckFor = 0;
@@ -131,7 +132,7 @@ function frame(now) {
   // 막혀 있는 동안에만 띄운다 — stuckFor 는 막힘이 풀리는 순간 0 이 되므로
   // 그 자체가 조건이다. 넘어가는 중에도 안 띄운다. 이미 넘어가고 있는데
   // 곧 넘어간다고 말하는 것은 뜻이 없다.
-  if (stuckFor > 0 && !flip.on) drawResetNotice(ctx, viewW, STUCK_PAUSE - stuckFor);
+  if (stuckFor > 0 && !flip.on) drawResetNotice(ctx, viewW, STUCK_PAUSE - stuckFor, stuck);
 
   requestAnimationFrame(frame);
 }

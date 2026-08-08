@@ -296,6 +296,27 @@ const panelOf = (draw) => {
         textAt(NOTICE_COUNT_FROM) === `RESHEET IN ${NOTICE_COUNT_FROM}`,
         `${textAt(NOTICE_COUNT_FROM)}`);
 
+  // 이유가 원인별로 갈린다. 잉크가 모자란 것과 길이 없는 것은 다른 말을 한다 —
+  // 이유를 말하는 유일한 자리가 같은 말로 뭉뚱그리면, 잉크를 아끼면 됐을
+  // 사람이 길이 없었다고 배운다.
+  const textFor = (remain, reason) => {
+    const ctx = recorder();
+    drawResetNotice(ctx, VIEW_W, remain, reason);
+    return ctx._r.texts.at(-1)?.t ?? null;
+  };
+  check('잉크가 원인이면 OUT OF INK',
+        textFor(4.9, 'OUT_OF_INK') === 'OUT OF INK', `${textFor(4.9, 'OUT_OF_INK')}`);
+  check('길이 없으면 NO ROUTE',
+        textFor(4.9, 'NO_ROUTE') === 'NO ROUTE', `${textFor(4.9, 'NO_ROUTE')}`);
+  check('세는 단은 원인과 상관없다',
+        textFor(2.9, 'OUT_OF_INK') === 'RESHEET IN 3', `${textFor(2.9, 'OUT_OF_INK')}`);
+  check('원인이 달라도 상자는 한 폭이다',
+        (() => {
+          const a = recorder(); drawResetNotice(a, VIEW_W, 4.9, 'OUT_OF_INK');
+          const b = recorder(); drawResetNotice(b, VIEW_W, 4.9, 'NO_ROUTE');
+          return a._r.rects[0].w === b._r.rects[0].w;
+        })());
+
   // 상자가 초마다 흔들리면 깜박임이 아니라 덜컹거림으로 보인다.
   const widths = [4.9, 3.9, 2.9, 1.9, 0.5].map((r) => noticeAt(r).fill.w);
   check('상자 폭이 초마다 안 변한다', new Set(widths).size === 1, `${widths.join(' / ')}`);

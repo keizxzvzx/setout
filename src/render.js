@@ -670,8 +670,8 @@ export function drawLogo(ctx, viewW, viewH) {
 //
 // 문구는 두 단이다. 이유를 먼저 말하고 나머지는 센다.
 //
-//   5초 남음   NO ROUTE        왜 넘어가는지
-//   4초 남음   NO ROUTE
+//   5초 남음   NO ROUTE │ OUT OF INK        왜 넘어가는지
+//   4초 남음   (같은 이유)
 //   3초 남음   RESHEET IN 3
 //   2초 남음   RESHEET IN 2
 //   1초 남음   RESHEET IN 1
@@ -680,7 +680,20 @@ export function drawLogo(ctx, viewW, viewH) {
 // 지나갔다 — 읽고 뜻을 새길 틈이 없으면 안 적은 것과 같다. 그렇다고 계속
 // 띄워 두면 읽을 것이 늘어 손을 움직일 시간을 뺏으므로 두 초로 잘랐다.
 // 그동안에도 초마다 다시 깜박이므로 멈춘 것으로 보이지는 않는다.
-const NOTICE_REASON = 'NO ROUTE';
+//
+// 이유가 원인별로 갈린다(session.stuckReason). 막힌 것은 하나로 보여도
+// 고쳐 볼 자리가 다르다 —
+//
+//   NO_ROUTE     어떤 잉크로도 이을 길이 없다
+//   OUT_OF_INK   길은 있는데 지울 것을 다 지워 되받아도 모자라다
+//
+// 처음에는 둘 다 NO ROUTE 였다. 플레이 테스트에서 잉크를 태워 막혔는데
+// "길이 없다" 고 적혀 나왔다 — 잉크를 아끼면 됐을 사람이 길이 없었다고
+// 배우면, 이유를 말하는 유일한 자리가 거짓말을 한 것이다.
+const NOTICE_REASON = {
+  NO_ROUTE: 'NO ROUTE',
+  OUT_OF_INK: 'OUT OF INK',
+};
 const NOTICE_COUNT = (n) => `RESHEET IN ${n}`;
 
 // 카운트가 시작하는 수, 그리고 그 앞에 이유가 머무는 초.
@@ -704,8 +717,13 @@ const NOTICE_ON = 0.58;
 // 여기는 초마다 바뀌므로 같은 방식을 쓰면 상자가 늘었다 줄어, 깜박임이 아니라
 // 덜컹거림으로 보인다. 예외가 아니라 같은 원리의 다른 결과다.
 function noticeWidth(ctx) {
-  let w = ctx.measureText(NOTICE_REASON).width;
-  // 셀 수를 전부 재 둔다. 지금은 한 자리뿐이라 서로 같지만, 세는 수를 늘리면
+  let w = 0;
+  // 이유를 전부 잰다. 원인마다 문구가 달라도 상자는 한 폭이어야 한다 —
+  // 같은 자리에 뜨는 것이 다른 크기로 뜨면 다른 물건으로 보인다.
+  for (const t of Object.values(NOTICE_REASON)) {
+    w = Math.max(w, ctx.measureText(t).width);
+  }
+  // 셀 수도 전부 재 둔다. 지금은 한 자리뿐이라 서로 같지만, 세는 수를 늘리면
   // 두 자리가 섞이므로 그때 폭을 다시 손대야 하는 자리를 안 남긴다.
   for (let n = 1; n <= NOTICE_COUNT_FROM; n++) {
     w = Math.max(w, ctx.measureText(NOTICE_COUNT(n)).width);
@@ -718,11 +736,15 @@ function noticeWidth(ctx) {
 // 문구도 깜박임도 전부 이 값 하나에서 나온다. 상태를 따로 들지 않으므로
 // 검사가 시간을 넣어 프레임을 직접 만들 수 있다 — drawSheetNo 가 층 번호
 // 하나만 받는 것과 같은 규율이다.
-export function drawResetNotice(ctx, viewW, remain) {
+// reason 은 session.stuckReason 의 원인 코드다. 못 알아보는 값이 와도
+// 배너가 빈칸이 되지는 않는다 — 가장 일반적인 말(NO ROUTE)로 무른다.
+export function drawResetNotice(ctx, viewW, remain, reason = 'NO_ROUTE') {
   if (!(remain > 0)) return;
 
   const secs = Math.ceil(remain);
-  const text = secs > NOTICE_COUNT_FROM ? NOTICE_REASON : NOTICE_COUNT(secs);
+  const text = secs > NOTICE_COUNT_FROM
+    ? (NOTICE_REASON[reason] ?? NOTICE_REASON.NO_ROUTE)
+    : NOTICE_COUNT(secs);
 
   // 한 초 안에서의 위치. 초가 바뀌는 순간마다 다시 켜진다.
   //
