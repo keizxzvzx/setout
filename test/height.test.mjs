@@ -369,6 +369,67 @@ for (const [w, h] of WINDOWS) {
 }
 
 // ---------------------------------------------------------------------------
+// 상한 위에 놓인 판은 자기 자리로 돌아갈 수 있다
+//
+// 정직 층은 상한이 0 인데 디렉터가 뜬 구조물을 하나 얹는다. 천장을 상한으로만
+// 잡으면 휠 한 번에 바닥까지 내리꽂히고, 그렇다고 **지금** 높이로 잡으면
+// 천장이 판을 따라 내려가 한 칸 내린 순간 다시 못 올라간다.
+//
+// 뒤엣것으로 한 번 나갔다. 내려놓고 보니 아니어서 되돌리려는 것이 휠을 굴리는
+// 이유의 절반인데 그 절반이 조용히 막혔고, 문구가 없는 게임이라 고장으로 읽혔다.
+// 미리 깔린 판은 zTop 까지, 내가 그은 판은 zMax 까지로 갈라 둘 다 풀었다.
+{
+  const { setStage } = await import(SRC + 'stage.js');
+  const { addPlate, resetBoard } = await import(SRC + 'board.js');
+
+  // 구조물은 반드시 층 명세를 거쳐 놓는다. zTop 이 거기서 파생되므로 명세를
+  // 건너뛰고 판만 얹으면 천장이 그 판을 모른다 — session.buildStage 가 하는
+  // 순서 그대로여야 검사가 실제 경로를 재는 것이 된다.
+  setStage({ zMax: 0, inkMax: 999, start: { x: 0, y: 0 }, goal: { x: 15, y: 15 },
+             fixtures: [{ cells: [{ x: 9, y: 9 }, { x: 10, y: 9 }], z: 3 }] });
+  resetBoard();
+  board.actor = null;
+
+  const [f0] = stage.fixtures;
+  const float = addPlate(f0.cells, f0.z, { fixed: true });
+  check('상한 위에 놓인다', float.z === 3 && stage.zMax === 0 && stage.zTop === 3,
+        `z=${float.z} zMax=${stage.zMax} zTop=${stage.zTop}`);
+
+  let down = 0;
+  while (movePlate(float, -1)) down++;
+  check('바닥까지 내려온다', float.z === 0 && down === 3, `z=${float.z}, ${down}칸`);
+
+  let up = 0;
+  while (movePlate(float, +1)) up++;
+  check('놓인 자리로 되돌아간다', float.z === 3 && up === 3, `z=${float.z}, ${up}칸`);
+  check('그 위로는 못 올라간다', movePlate(float, +1) === false, `z=${float.z}`);
+
+  // 플레이어가 그은 판은 언제나 바닥에서 시작하므로 천장이 그대로 상한이다.
+  // 여기가 흔들리면 상한을 조여 착시를 뺏는다는 손잡이가 통째로 헐거워진다.
+  setStage({ zMax: 2, inkMax: 999, start: { x: 0, y: 0 }, goal: { x: 15, y: 15 } });
+  resetBoard();
+  board.actor = null;
+
+  const mine = addPlate([{ x: 5, y: 5 }], 0);
+  let rise = 0;
+  while (movePlate(mine, +1)) rise++;
+  check('내가 그은 판은 상한까지만', mine.z === 2 && rise === 2, `z=${mine.z}`);
+
+  // 같은 층에 구조물이 떠 있어도 내 판의 천장은 안 올라간다. 여기가 흔들리면
+  // 정직 층에서 구조물 높이를 보고 자기 판을 맞춰 올릴 수 있게 되어,
+  // 상한을 조여 착시를 뺏는다는 손잡이가 통째로 헐거워진다.
+  setStage({ zMax: 0, inkMax: 999, start: { x: 0, y: 0 }, goal: { x: 15, y: 15 },
+             fixtures: [{ cells: [{ x: 12, y: 12 }], z: 4 }] });
+  resetBoard();
+  board.actor = null;
+  for (const f of stage.fixtures) addPlate(f.cells, f.z, { fixed: true });
+
+  const drawn = addPlate([{ x: 3, y: 3 }], 0);
+  check('구조물이 z=4 에 떠 있어도', stage.zTop === 4 && stage.zMax === 0);
+  check('내 판은 한 칸도 안 올라간다', movePlate(drawn, +1) === false, `z=${drawn.z}`);
+}
+
+// ---------------------------------------------------------------------------
 
 console.log('');
 for (const f of fails) console.log('  FAIL  ' + f);
