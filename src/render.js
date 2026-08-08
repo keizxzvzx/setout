@@ -828,6 +828,58 @@ export function drawIllusionGlint(ctx, seam, remain) {
   ctx.restore();
 }
 
+// 도착 점화. 목표에 닿은 순간, 표식이 찍히듯 앰버 링이 퍼진다.
+//
+// 도착하고 도면이 넘어가기까지 CLEAR_PAUSE 만큼 사이가 있는데(main), 지금까지
+// 그 사이에는 아무 일도 없었다 — 끝났다는 것을 도면이 넘어가는 것으로야
+// 알았다. 층을 끝낸 순간이 이 게임의 유일한 보상인데 그 순간이 비어 있었다
+// (플레이 테스트).
+//
+// 앰버를 쓴다. 새 뜻을 만드는 것이 아니다 — 목표 표식이 처음부터 앰버였고,
+// 도착은 그 표식이 찍히는 순간이므로 같은 색이 밝아지는 것이 맞다.
+// 리셋 예고가 앰버를 못 쓰는 것과 같은 원리의 반대쪽이다: 그쪽은 자원의
+// 일이 아니라서 못 쓰고, 이쪽은 바로 그 표식의 일이라서 쓴다.
+//
+// t 는 0..1 진행도다 (main 이 clearedFor / CLEAR_PAUSE 를 넘긴다).
+// 끝(t=1)에서 링 셋이 전부 잦아들어, 도면이 넘어갈 때 빛이 남아 있지 않다.
+export function drawClearBurst(ctx, goal, t) {
+  if (!goal || !(t > 0) || t >= 1) return;
+
+  // 목표 칸에 깔린 판의 높이를 따른다. 도착했으므로 보통 판이 있지만,
+  // 없어도 바닥에 그리면 된다.
+  let z = 0;
+  for (const p of board.plates) {
+    if (p.cells.some((c) => c.x === goal.x && c.y === goal.y)) { z = p.z; break; }
+  }
+
+  const lift = PLATE_T * view.scale;
+  const d = tileDiamond(goal.x, goal.y, z).map((p) => ({ x: p.x, y: p.y - lift }));
+  const cx = (d[0].x + d[2].x) / 2;
+  const cy = (d[0].y + d[2].y) / 2;
+
+  ctx.save();
+  ctx.strokeStyle = COLOR.amber;
+  ctx.lineCap = 'round';
+  ctx.shadowColor = COLOR.amber;
+
+  // 링 셋이 차례로 나선다. 각 링은 제 진행도만큼 커지고 그만큼 옅어진다 —
+  // 도장이 찍히고 그 울림이 퍼져 나가는 순서다.
+  for (let k = 0; k < 3; k++) {
+    const p = Math.min(1, Math.max(0, t * 1.6 - k * 0.3));
+    if (p <= 0) continue;
+    const s = 1 + 2.1 * p;
+    ctx.globalAlpha = (1 - p) * (0.9 - k * 0.22);
+    ctx.lineWidth = 2.5 - k * 0.7;
+    ctx.shadowBlur = 10 * (1 - p);
+    ctx.beginPath();
+    ctx.moveTo(cx + (d[0].x - cx) * s, cy + (d[0].y - cy) * s);
+    for (const q of d.slice(1)) ctx.lineTo(cx + (q.x - cx) * s, cy + (q.y - cy) * s);
+    ctx.closePath();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 // 커서가 가리키는 칸. 스타일러스 끝이 닿은 자리라는 뜻으로 앰버.
 //
 // 이 하이라이트는 연출이기 이전에 좌표계 검증 도구다.

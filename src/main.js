@@ -8,7 +8,7 @@ import { session, beginRun, beginFlip, updateFlip, flip, stuckReason } from './s
 import {
   clear, drawFloor, drawFootprints, drawGoal, drawPlates,
   drawStroke, drawHoverCell, drawInkGauge, drawControls, drawSheetNo, drawLogo,
-  drawResetNotice, drawIllusionGlint, GLINT_TIME,
+  drawResetNotice, drawIllusionGlint, GLINT_TIME, drawClearBurst,
 } from './render.js';
 import { pointer, attachPointer, abortGesture, resyncPointer } from './input.js';
 
@@ -124,6 +124,10 @@ function frame(now) {
 
   // 이음매는 판 위에 얹힌 빛이다. 판 다음, 도면이 움직이지 않을 때만.
   if (!flip.on && glintFor > 0) drawIllusionGlint(ctx, session.hint, glintFor);
+
+  // 도착 점화. 도착에서 넘어가기까지의 사이(CLEAR_PAUSE)를 그대로 진행도로
+  // 쓴다 — 링이 다 잦아드는 순간과 도면이 넘어가는 순간이 같은 순간이다.
+  if (board.cleared && !flip.on) drawClearBurst(ctx, board.goal, clearedFor / CLEAR_PAUSE);
 
   if (shift) setView(view.ox, baseY, view.scale);
 
