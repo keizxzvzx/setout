@@ -409,7 +409,10 @@ const scene = (intent) => ({
         tight.fix.action === 'budget' && tight.fix.inkMax === 34 + WASTE_MARGIN * 2,
         `→ ${tight.fix.inkMax}`);
 
-  const asked = verify(scene('open'), 40);
+  // 배급은 창 바닥으로 준다. 40 을 박아 두었더니 WASTE_MARGIN 을 올리는 순간
+  // 문턱이 그 위로 올라가 검사만 떨어졌다 — 층이 나빠진 것이 아니라 검사가
+  // 상수를 안 따라간 것이다. 바로 아래에서 창 바닥이 이 값임을 따로 확인한다.
+  const asked = verify(scene('open'), 34 + WASTE_MARGIN * 2);
   check('둘 다 배급 안이면 통과', asked.ok, asked.code);
   check('통과 이유에 갈리는 값이 적힌다', /갈린다/.test(asked.reason), asked.reason);
 
