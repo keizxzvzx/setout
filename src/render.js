@@ -785,6 +785,49 @@ export function drawResetNotice(ctx, viewW, remain, reason = 'NO_ROUTE') {
   ctx.restore();
 }
 
+// 착시 이음매 글린트. 착시 강제 층에 처음 선 사람에게만 뜬다(session.hint).
+//
+// 1층을 그리기로 푼 사람에게 다음 층은 절벽이다 — 배급이 그리기 해법보다
+// 작은데, 그 사실을 알릴 문구가 이 게임에는 없다. 그래서 목표와 뜬판이
+// 화면에서 만나는 변을 층이 뜰 때 잠깐 빛나게 한다. 경로가 아니라 이음매
+// 하나다 — "여기가 이어져 있다" 까지만 말하고 건너는 것은 플레이어의 몫이다.
+//
+// 색은 흰빛이다. 앰버는 자원(잉크·목표)의 색이고 코발트는 캐릭터의 색이라
+// 둘 다 못 쓴다(4단계·리셋 예고와 같은 이유). 빛나는 것이므로 판보다 밝아야
+// 하고, 팔레트에서 그보다 밝은 자리는 흰빛뿐이다.
+//
+// remain 은 남은 초다. GLINT_TIME 동안 세 번 맥동하고 사라진다 — 리셋 예고의
+// 깜박임과 같은 원리로, 한 번 켜져 있기만 하면 배경으로 읽혀 눈에 안 든다.
+export const GLINT_TIME = 2.4;
+
+export function drawIllusionGlint(ctx, seam, remain) {
+  if (!seam || !(remain > 0)) return;
+
+  const t = PLATE_T * view.scale;
+  const a = worldToScreen(seam.a.x, seam.a.y, 0);
+  const b = worldToScreen(seam.b.x, seam.b.y, 0);
+
+  // 위상 0→1 에 세 마루. |sin| 이라 시작과 끝이 0 이어서, 켜지며 나타나고
+  // 잦아들며 사라진다 — 뚝 끊기면 무엇이 있었는지 되짚을 수 없다.
+  const phase = 1 - remain / GLINT_TIME;
+  const lit = Math.abs(Math.sin(phase * Math.PI * 3));
+
+  ctx.save();
+  ctx.strokeStyle = '#EDF2F7';
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = 'round';
+  ctx.shadowColor = '#EDF2F7';
+  ctx.shadowBlur = 12 * lit;
+  ctx.globalAlpha = 0.15 + 0.8 * lit;
+  ctx.beginPath();
+  // 판 윗면 모서리 높이. 바닥 변에 그으면 판 두께만큼 어긋나 두 물체 사이가
+  // 아니라 앞칸 바닥을 비추는 것이 된다.
+  ctx.moveTo(a.x, a.y - t);
+  ctx.lineTo(b.x, b.y - t);
+  ctx.stroke();
+  ctx.restore();
+}
+
 // 커서가 가리키는 칸. 스타일러스 끝이 닿은 자리라는 뜻으로 앰버.
 //
 // 이 하이라이트는 연출이기 이전에 좌표계 검증 도구다.

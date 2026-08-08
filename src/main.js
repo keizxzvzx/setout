@@ -8,7 +8,7 @@ import { session, beginRun, beginFlip, updateFlip, flip, stuckReason } from './s
 import {
   clear, drawFloor, drawFootprints, drawGoal, drawPlates,
   drawStroke, drawHoverCell, drawInkGauge, drawControls, drawSheetNo, drawLogo,
-  drawResetNotice,
+  drawResetNotice, drawIllusionGlint, GLINT_TIME,
 } from './render.js';
 import { pointer, attachPointer, abortGesture, resyncPointer } from './input.js';
 
@@ -26,6 +26,10 @@ let clearedFor = 0;
 // 지우는 중에 도면이 넘어가지 않는다. 값과 그 근거는 config.STUCK_PAUSE —
 // 화면에 남은 초를 적는 쪽과 같은 값을 봐야 해서 저기 있다.
 let stuckFor = 0;
+
+// 착시 이음매 글린트가 남은 초. 층이 다 넘어온 순간에 건다 — 넘어가는 중에
+// 걸면 도면이 움직이는 동안 다 잦아들어, 정작 볼 수 있게 됐을 때는 끝나 있다.
+let glintFor = 0;
 
 function resize() {
   const dpr = window.devicePixelRatio || 1;
@@ -92,7 +96,17 @@ function frame(now) {
   // 가리키는 자리는 맞지만, 그 자리에 있던 판은 이미 없어졌다.
   const wasFlipping = flip.on;
   const shift = updateFlip(dt);
-  if (wasFlipping && !flip.on) resyncPointer();
+  if (wasFlipping && !flip.on) {
+    resyncPointer();
+    if (session.hint) glintFor = GLINT_TIME;
+  }
+
+  // 세는 동안 착시를 건넜으면 그 자리에서 끈다. 이미 건넌 사람에게 남은
+  // 맥동은 힌트가 아니라 정답 표시다.
+  if (glintFor > 0) {
+    glintFor -= dt;
+    if (!session.hint || board.stats.illusionSteps > 0) glintFor = 0;
+  }
 
   clear(ctx, viewW, viewH);
 
@@ -107,6 +121,9 @@ function frame(now) {
   drawFootprints(ctx);
   drawGoal(ctx);        // 바닥에 찍힌 표식. 판을 깔면 가려지는 것이 맞다
   drawPlates(ctx);      // 캐릭터는 판을 전부 그린 뒤 여기서 같이 그려진다
+
+  // 이음매는 판 위에 얹힌 빛이다. 판 다음, 도면이 움직이지 않을 때만.
+  if (!flip.on && glintFor > 0) drawIllusionGlint(ctx, session.hint, glintFor);
 
   if (shift) setView(view.ox, baseY, view.scale);
 

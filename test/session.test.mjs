@@ -632,5 +632,43 @@ const B_draw = (cells) => {
 }
 
 // ---------------------------------------------------------------------------
+// 착시 이음매 힌트 — 가르칠 것이 있는 층에서만, 아직 모르는 사람에게만
+//
+// 1층을 그리기로 푼 사람에게 착시 강제 층은 절벽이다(플레이 테스트).
+// 층을 세울 때 목표와 뜬판이 화면에서 만나는 변을 잡아 두고(session.hint),
+// 층이 다 넘어온 순간 잠깐 빛난다. 여기서는 잡는 조건과 자리를 본다.
+// ---------------------------------------------------------------------------
+{
+  // 실플레이에서 디렉터가 냈던 2층: 배급 20 < 그리기 해법이라 착시가 강제된다.
+  // (10,15) 를 z=8 로 올리면 화면에서 (2,7) — 목표 (1,7) 의 오른쪽에 선다.
+  const illusionSpec = {
+    start: { x: 6, y: 0 }, goal: { x: 1, y: 7 }, inkMax: 20, zMax: 8,
+    fixtures: [
+      { cells: [{x:11,y:10},{x:11,y:11},{x:11,y:12},{x:11,y:13},{x:11,y:14},{x:11,y:15},{x:10,y:15}], z: 8 },
+    ],
+  };
+
+  beginRun();
+  check('1층은 그리기로 풀리므로 힌트가 없다', session.hint === null);
+
+  buildStage(illusionSpec);
+  check('착시 강제 층에는 힌트가 있다', !!session.hint);
+  check('이음매가 목표와 판이 만나는 변이다',
+        session.hint && session.hint.a.x === 2 && session.hint.a.y === 7 &&
+        session.hint.b.x === 2 && session.hint.b.y === 8,
+        session.hint ? `(${session.hint.a.x},${session.hint.a.y})-(${session.hint.b.x},${session.hint.b.y})` : 'null');
+
+  // 배급이 넉넉해 그리기로도 풀리면 가르칠 것이 없다
+  buildStage({ ...illusionSpec, inkMax: 999 });
+  check('그리기로 풀리는 층에는 안 띄운다', session.hint === null);
+
+  // 한 번이라도 건너 본 사람에게는 힌트가 아니라 정답 표시다
+  board.stats.illusionSteps = 1;
+  buildStage(illusionSpec);
+  check('착시를 아는 사람에게는 안 띄운다', session.hint === null);
+  board.stats.illusionSteps = 0;
+}
+
+// ---------------------------------------------------------------------------
 console.log(fail ? `\n${fail}건 실패` : '\n전부 통과');
 process.exit(fail ? 1 : 0);

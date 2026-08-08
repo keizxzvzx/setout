@@ -22,6 +22,7 @@ export const session = {
   seed: 0,       // 층마다 하나씩. 같은 시드에 같은 층이 나온다
   redeals: 0,    // 못 쓰게 되어 다시 뜬 도면 수
   last: null,    // 마지막 판단 기록
+  hint: null,    // 착시 이음매 힌트. 층을 세울 때 계산한다 — hintSeam 참조
 };
 
 // 명세대로 층을 세운다. 1층이든 디렉터가 낸 층이든 같은 코드를 탄다.
@@ -45,6 +46,51 @@ export function buildStage(spec) {
   // 다시 안 잡으면 이전 층의 여유로 그려 올린 판의 머리가 잘리는데,
   // 잘린 것은 화면 밖이라 잘렸다는 것조차 보이지 않는다.
   refit();
+
+  // 착시를 가르칠 자리가 있는 층인지는 층을 세운 지금이 가장 싸게 안다.
+  session.hint = hintSeam();
+}
+
+// --- 착시를 가르치는 자리 ----------------------------------------------------
+//
+// 다리로만 풀어 온 사람이 처음 만나는 착시 강제 층은 낙차가 절벽이다 —
+// 1층은 순수 그리기로 풀리는데 다음 층은 갑자기 착시 없이는 안 풀린다
+// (플레이 테스트에서 지적받았다). 문구가 없는 게임이라 규칙을 말로 가르칠
+// 자리도 없다. 대신 목표와 뜬판이 화면에서 만나는 **이음매**를 층이 뜰 때
+// 잠깐 빛나게 한다(render.drawIllusionGlint). 경로를 보여주는 것이 아니라
+// "여기가 이어져 있다" 는 사실 하나만 비춘다.
+//
+// 착시를 한 번이라도 건넌 사람에게는 안 띄운다. 이미 아는 것을 비추면
+// 그때부터는 힌트가 아니라 정답 표시다. 지표는 런 단위로 쌓이므로
+// (beginRun 에서만 0 이 된다) 새로 시작한 사람은 다시 본다.
+function hintSeam() {
+  if (board.stats.illusionSteps > 0) return null;
+
+  // 그리기만으로 배급 안에 풀리는 층이면 착시를 가르칠 이유가 없다.
+  const from = actorCell();
+  if (!from || !board.goal) return null;
+  const honest = minInk(cellList(), from, board.goal, { allowIllusion: false });
+  if (honest && honest.cost <= board.ink) return null;
+
+  // 목표 칸과 화면에서 맞닿은 뜬판 윗면 — 디렉터가 착시 층마다 목표 옆에
+  // 세우는 그 자리다. 공유 변의 두 격자점을 돌려주고, 높이는 render 가
+  // 판 두께를 알므로 거기서 맞춘다.
+  const g = board.goal;
+  for (const p of board.plates) {
+    if (!p.z) continue;
+    for (const c of p.cells) {
+      const dx = (c.x - p.z) - g.x;
+      const dy = (c.y - p.z) - g.y;
+      if (Math.abs(dx) + Math.abs(dy) !== 1) continue;
+      const a = dx === 1 ? { x: g.x + 1, y: g.y }
+              : dx === -1 ? { x: g.x, y: g.y }
+              : dy === 1 ? { x: g.x, y: g.y + 1 }
+              : { x: g.x, y: g.y };
+      const b = dx !== 0 ? { x: a.x, y: a.y + 1 } : { x: a.x + 1, y: a.y };
+      return { a, b };
+    }
+  }
+  return null;
 }
 
 // 판을 처음부터. 1층은 손으로 잡아 둔 고정 배치다.
