@@ -125,15 +125,18 @@
 
 ## 직접 돌려보려면
 
-ES 모듈을 쓰므로 `index.html` 을 파일로 여는 것(`file://`)으로는 안 되고,
-아무 정적 서버로든 띄워야 한다.
+ES 모듈을 쓰므로 `index.html` 을 파일로 여는 것(`file://`)으로는 안 된다.
+저장소에 정적 서버를 같이 두었다 — node 표준 모듈만 쓰므로 설치할 것이 없다.
 
 ```bash
-python -m http.server 8000
+node serve.mjs
 ```
 
-그리고 http://localhost:8000 을 연다. Python 이 없으면 `npx serve` 도 된다.
-빌드 단계는 없다 — 소스가 그대로 실행된다.
+그리고 http://localhost:8000 을 연다. 포트는 인자로 바꿀 수 있다
+(`node serve.mjs 3000`). `python -m http.server 8000` 이나 `npx serve` 로 띄워도
+똑같이 된다.
+
+**빌드 단계는 없다.** 소스가 그대로 실행된다.
 
 ## 검증
 
