@@ -35,13 +35,97 @@ export function makeRng(seed) {
 
 const pick = (rng, lo, hi) => lo + Math.floor(rng() * (hi - lo + 1));
 const inBounds = (x, y, w, h) => x >= 0 && y >= 0 && x < w && y < h;
+const dist = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+
+const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+// 곧게 가던 방향에 실어 주는 가중치.
+//
+// 네 방향을 고르게 뽑으면 매번 구불구불한 것만 나온다. 직선이 안 나오는 것도
+// 다양한 것이 아니다. 3 이면 곧게 가던 방향이 나머지 셋을 합친 것과 비슷해져
+// 곧은 판과 꺾인 판이 섞여 나온다.
+const STRAIGHT_BIAS = 3;
+
+// 자기 회피 보행 — 구조물의 모양
+//
+// 한 축으로만 k 를 더하던 것을 한 칸씩 걷는 것으로 바꾼다. 직선은 그중 한
+// 결과로 남고 ㄱ·ㄷ·계단·S 가 같이 나온다. 획을 그어 만든 판과 같은 모양이라
+// 미리 깔린 것과 내가 그은 것이 형태로는 구분되지 않는다 — 색으로만 갈린다.
+//
+// 한 줄로 이어져 있다는 것이 모양 문제만은 아니다. 셋이 여기서 나온다.
+//
+//   같은 z 위의 4방향 인접이라 전부 **진짜 길**이다 → 걸어서 건너는 이음매다
+//   z 가 하나뿐이라 화면 자리 (x−z, y−z) 가 일대일이다 → 자기끼리 안 겹친다
+//   양 끝이 남는다 → 목표와 시작을 이음매 끝에 붙이는 규칙이 그대로 산다
+//
+// lo 는 좌표의 하한이다. 화면 자리가 (x−z, y−z) 이므로 여기에 z 를 넣으면
+// 격자 안이라는 조건과 화면 안이라는 조건이 한꺼번에 걸린다. 직선일 때는
+// 시작 좌표에서 한 번 보면 끝났지만, 보행은 어디로 갈지 모르므로 한 칸
+// 놓을 때마다 본다.
+function walk(rng, len, lo, gridW, gridH) {
+  if (lo > gridW - 1 || lo > gridH - 1) return [];
+
+  const head = { x: pick(rng, lo, gridW - 1), y: pick(rng, lo, gridH - 1) };
+  const cells = [head];
+  const taken = new Set([skey(head.x, head.y)]);
+
+  let dir = null;
+
+  for (let k = 1; k < len; k++) {
+    const last = cells[k - 1];
+    const open = [];
+
+    for (const d of DIRS) {
+      const x = last.x + d[0];
+      const y = last.y + d[1];
+      if (x < lo || y < lo || x >= gridW || y >= gridH) continue;
+      if (taken.has(skey(x, y))) continue;
+
+      const weight = dir && d[0] === dir[0] && d[1] === dir[1] ? STRAIGHT_BIAS : 1;
+      for (let i = 0; i < weight; i++) open.push({ x, y, d });
+    }
+
+    // 막히면 거기서 끝낸다. 되짚어 가며 길이를 채우지 않는다 — 짧게 나온 것은
+    // 짧은 대로 구조물이고, 물려서 채우면 같은 자리를 맴도는 모양만 는다.
+    // 모자란 길이는 부르는 쪽이 보고 버린다.
+    if (!open.length) break;
+
+    const next = open[pick(rng, 0, open.length - 1)];
+    dir = next.d;
+    cells.push({ x: next.x, y: next.y });
+    taken.add(skey(next.x, next.y));
+  }
+
+  return cells;
+}
+
+// 몇 번 꺾였는가. 판단 기록에 모양을 남기려고 센다 — 무엇을 낸 층인지
+// 로그만 보고 알 수 있어야 제출물 4번의 증거가 된다.
+function turnsIn(cells) {
+  let turns = 0;
+  for (let i = 2; i < cells.length; i++) {
+    const a = cells[i - 1];
+    const b = cells[i - 2];
+    const c = cells[i];
+    if (c.x - a.x !== a.x - b.x || c.y - a.y !== a.y - b.y) turns++;
+  }
+  return turns;
+}
+
+const shapeOf = (cells) =>
+  turnsIn(cells) === 0 ? '곧은' : `${turnsIn(cells)}번 꺾인`;
 
 // 고정 구조물이 어느 층에서나 지켜야 하는 것.
 //
-// z 가 그 층의 zMax 를 넘으면 안 된다. pickAt 은 zMax 까지만 훑지만 렌더와
-// 솔버는 안 훑는다. 넘겨 놓으면 화면에는 보이고 솔버는 길로 세는데 플레이어는
-// 집을 수 없는 판이 되어, 세 경로가 보는 것이 갈린다.
-export const fixtureOk = (f, zMax) => f.z >= 0 && f.z <= zMax;
+// 한동안은 그 층의 zMax 이하여야 했다. pickAt 이 거기까지만 훑었으므로 넘겨
+// 놓으면 화면에는 보이고 솔버는 길로 세는데 플레이어는 집을 수 없는 판이
+// 되었다. 이제 pickAt 은 stage.zTop — 그 층에 실제로 있는 가장 높은 것 —
+// 까지 훑으므로 구조물은 플레이어 상한 위에 있어도 된다.
+// 정직 층(zMax=0)의 뜬판이 그 자리에 선다.
+//
+// 남는 상한은 Z_MAX 하나다. 카메라 여유와 깊이 정렬이 거기까지만 확인돼 있고,
+// 넘기면 판 머리가 화면 밖으로 나가는데 잘린 것은 보이지도 않는다.
+export const fixtureOk = (f, ceiling = Z_MAX) => f.z >= 0 && f.z <= ceiling;
 
 // 착시 층의 구조물이 더 지켜야 하는 것.
 //
@@ -52,7 +136,7 @@ export const fixtureOk = (f, zMax) => f.z >= 0 && f.z <= zMax;
 //
 // 정직 층에는 이 규칙을 걸지 않는다. 거기서는 구조물이 이음매가 아니라
 // 바닥에 눕힌 공짜 길이고, 정직하게 이어지는 것이 목적이기 때문이다.
-export const seamOk = (f, zMax) => f.z >= 1 && f.z <= zMax;
+export const seamOk = (f, ceiling = Z_MAX) => f.z >= 1 && f.z <= ceiling;
 
 // ---------------------------------------------------------------------------
 // 착시를 요구하는 층
@@ -64,28 +148,82 @@ export const seamOk = (f, zMax) => f.z >= 1 && f.z <= zMax;
 // 올려 둔 줄은 자기 기둥을 계속 잡고 있으므로 원래 자리에는 그릴 수도 설 수도
 // 없다. 이음매를 놓는 것이 동시에 벽을 놓는 것이기도 하다.
 // ---------------------------------------------------------------------------
-function illusionLayout(rng, gridW, gridH, zMax, minCells) {
+// 이음매가 화면에서 벌려 놓아야 하는 최소 거리 (칸).
+const SEAM_SPAN = 4;
+
+// 층이 얹는 구조물의 양. 익히는 판(depth 0)과 다 자란 판(depth 1).
+//
+// 예전에는 이 숫자가 의도에 딸려 있었다. 착시 층은 이음매 하나로 끝이라 화면이
+// 휑했고, 정직 층은 처음부터 여섯 개였다. 그래서 같은 두 장째가 사람에 따라
+// 1개/5칸이기도 6개/23칸이기도 했다. 이제 시트 번호가 쥔다(profile.depthOf).
+//
+// 뜬판은 어느 쪽이든 **둘 이상**이다. 하나뿐이면 그것이 곧 이 층의 정답이라
+// 고를 것이 없고, 둘부터 어느 쪽을 쓸지가 플레이어의 판단이 된다.
+const GROWTH = [
+  // 0 — 익히는 판
+  { extras: [1, 2], extraLen: [2, 4], bridges: [2, 3], floats: [2, 2] },
+  // 1 — 다 자란 판
+  { extras: [5, 8], extraLen: [2, 5], bridges: [5, 8], floats: [2, 3] },
+];
+
+// 자리를 못 잡았을 때 같은 조각을 다시 뽑아 보는 횟수 (조각 하나당).
+const PLACE_TRIES = 8;
+
+// 뜬판을 흩뿌린다. 이음매처럼 길 노릇을 하라고 놓는 것이 아니라 화면을 채우고
+// 고를 거리를 만드는 것이라, 자리를 못 잡으면 그 조각만 포기하고 넘어간다.
+//
+// 여기 놓이는 것도 전부 z ≥ 1 이다. 정직한 간선은 z 가 같아야 성립하는데
+// 그릴 수 있는 칸은 언제나 z=0 이므로, 하나라도 바닥에 눕히는 순간
+// "그리기만으로 가면 얼마인가" 가 거짓말이 된다 — seamOk 가 지키는 그 규칙이다.
+//
+// taken 을 제자리에서 불린다. 기둥과 화면 자리를 한 집합에 같이 넣는 것은
+// 둘 다 "여기는 이미 누가 쓴다" 라는 같은 뜻이기 때문이다.
+function scatter(rng, count, lifts, lens, gridW, gridH, taken) {
+  const out = [];
+
+  for (let i = 0; i < count * PLACE_TRIES && out.length < count; i++) {
+    const lift = pick(rng, ...lifts);
+    const cells = walk(rng, pick(rng, ...lens), lift, gridW, gridH);
+    if (!cells.length) continue;
+
+    const span = cells.map((c) => ({ x: c.x - lift, y: c.y - lift }));
+    const keys = [...cells, ...span].map((c) => skey(c.x, c.y));
+
+    // 자기 기둥과 자기 화면 자리가 겹치는 것도 막는다. lift 만큼 대각으로
+    // 뻗은 보행에서 실제로 일어난다.
+    if (new Set(keys).size !== keys.length) continue;
+    if (keys.some((k) => taken.has(k))) continue;
+
+    for (const k of keys) taken.add(k);
+    out.push({ cells, z: lift, span });
+  }
+
+  return out;
+}
+
+function illusionLayout(rng, gridW, gridH, zMax, minCells, depth) {
   if (zMax < 1) return null;
 
   const lift = pick(rng, 1, zMax);
-  const len = pick(rng, 4, 8);
-  const horizontal = rng() < 0.5;
 
   // 격자와 화면 양쪽에서 부지 안이어야 한다. 화면 자리가 (x−lift, y−lift) 이므로
-  // 시작 좌표에 lift 만큼 여유를 두면 양쪽이 한꺼번에 만족된다.
-  const cells = [];
+  // 보행의 하한에 lift 를 넣으면 양쪽이 한꺼번에 만족된다.
+  const cells = walk(rng, pick(rng, 4, 8), lift, gridW, gridH);
 
-  if (horizontal) {
-    if (gridW - len < lift) return null;
-    const x0 = pick(rng, lift, gridW - len);
-    const y0 = pick(rng, lift, gridH - 1);
-    for (let k = 0; k < len; k++) cells.push({ x: x0 + k, y: y0 });
-  } else {
-    if (gridH - len < lift) return null;
-    const x0 = pick(rng, lift, gridW - 1);
-    const y0 = pick(rng, lift, gridH - len);
-    for (let k = 0; k < len; k++) cells.push({ x: x0, y: y0 + k });
-  }
+  // 짧게 끝난 보행은 버린다. 이음매의 값은 화면에서 벌어 주는 거리라
+  // 서너 칸으로는 실어 나를 것이 없다.
+  if (cells.length < 4) return null;
+
+  // 끝에서 끝까지도 그만큼 벌어져 있어야 한다.
+  //
+  // 칸 수가 아니라 **두 끝 사이의 거리**가 이음매의 값이다. 목표는 한쪽 끝에
+  // 붙고 시작은 반대쪽 끝에서 떨어뜨리므로, 접혀서 제자리로 돌아오는 보행은
+  // 여덟 칸을 써도 두 칸짜리 이음매다. 그러면 그리기 값이 안 커져 착시와의
+  // 사이에 배급을 끼울 자리가 없어진다 — 실측하니 시도 100번 중 36번이
+  // NO_BUDGET_WINDOW 였고, 걸린 것이 전부 이 부류였다.
+  //
+  // 같은 z 위에 있으므로 격자 거리가 그대로 화면 거리다.
+  if (dist(cells[0], cells.at(-1)) < SEAM_SPAN) return null;
 
   const strip = { cells, z: lift };
   const columns = new Set(cells.map((c) => skey(c.x, c.y)));
@@ -151,14 +289,30 @@ function illusionLayout(rng, gridW, gridH, zMax, minCells) {
 
   const start = starts[pick(rng, 0, starts.length - 1)];
 
+  // 이음매 말고 더 얹는 뜬판. 시작과 목표가 정해진 뒤에 놓는다 — 먼저 흩뿌리면
+  // 목표를 붙일 자리와 시작을 세울 자리를 자기가 먹어 버린다.
+  const taken = new Set([
+    ...columns, ...span,
+    skey(goal.x, goal.y), skey(start.x, start.y),
+  ]);
+  const extras = scatter(rng, pick(rng, ...GROWTH[depth].extras),
+                         [1, zMax], GROWTH[depth].extraLen, gridW, gridH, taken);
+
+  // 뜬판 둘은 지켜야 한다. 하나도 못 놓았으면 부지가 이미 빡빡한 것이라
+  // 이 후보는 버린다.
+  if (!extras.length) return null;
+
+  const fixtures = [strip, ...extras.map((f) => ({ cells: f.cells, z: f.z }))];
+
   return {
     intent: 'illusion',
     start,
     goal,
     zMax,
-    fixtures: [strip],
-    note: `판 ${len}칸을 z=${lift} 로 올려 목표 옆에 세웠다. ` +
-          `3D 에서는 ${lift}칸 떨어져 있고 아무것도 닿아 있지 않다.`,
+    fixtures,
+    note: `${shapeOf(cells)} 판 ${cells.length}칸을 z=${lift} 로 올려 목표 옆에 세웠다. ` +
+          `3D 에서는 ${lift}칸 떨어져 있고 아무것도 닿아 있지 않다. ` +
+          `곁에 뜬판 ${extras.length}개를 더 놓아 고를 것을 만들었다.`,
   };
 }
 
@@ -175,39 +329,55 @@ function illusionLayout(rng, gridW, gridH, zMax, minCells) {
 // **공짜 징검다리**다 — 딛고 올라섰다 내려오면 한 칸을 안 그리고 넘어간다.
 // 착시를 뺏으려던 층이 착시를 나눠 주고 있었다.
 //
-// 그래서 구조물은 바닥에 눕힌다. z=0 이면 그린 판과 정직하게 이어지는 공짜
-// 길이 되어 벽이 아니라 지름길이 되고, 배급이 조인 층에서는 그 지름길을
-// 찾아 꿰는 것이 그대로 퍼즐이 된다.
+// 그래서 길 노릇을 하는 구조물은 바닥에 눕힌다. z=0 이면 그린 판과 정직하게
+// 이어지는 공짜 길이 되어 벽이 아니라 지름길이 되고, 배급이 조인 층에서는 그
+// 지름길을 찾아 꿰는 것이 그대로 퍼즐이 된다.
+//
+// 그 위에 **길이 아닌 뜬판을 하나** 얹는다. 판이 전부 바닥에 누워 있으면 그
+// 장에서만 화면이 평평하고, 무엇보다 이 게임이 무엇을 하는 게임인지가 사라진다.
+// 상한이 0 이라 플레이어는 그것을 못 올리고 못 따라 만든다 — 정렬을 뺏는다는
+// 정직 층의 뜻은 그대로다.
 // ---------------------------------------------------------------------------
-function honestLayout(rng, gridW, gridH, minCells) {
+
+// 띄워 둘 판. 짧고 낮게 둔다.
+//
+// 길수록 딛고 아낄 수 있는 칸이 늘어 경로에서 더 멀리 떨어뜨려야 하고,
+// 높을수록 카메라가 위를 더 비워 도면이 작아진다. 정직 층은 원래 상한이 0 이라
+// 여유가 1 이면 됐던 층이므로, 여기서 8 까지 띄우면 그 장만 눈에 띄게 쪼그라든다.
+const FLOAT_LEN = [1, 3];
+const FLOAT_LIFT = [2, 4];
+
+function honestLayout(rng, gridW, gridH, minCells, depth) {
   const lid = 0;
 
   const bridges = [];
   const columns = new Set();
-  const count = pick(rng, 3, 6);
+  const count = pick(rng, ...GROWTH[depth].bridges);
 
   for (let i = 0; i < count; i++) {
-    const len = pick(rng, 3, 6);
-    const horizontal = rng() < 0.5;
+    const cells = walk(rng, pick(rng, 3, 6), 0, gridW, gridH);
 
-    const x0 = pick(rng, 0, gridW - (horizontal ? len : 1));
-    const y0 = pick(rng, 0, gridH - (horizontal ? 1 : len));
-
-    const cells = [];
-    for (let k = 0; k < len; k++) {
-      const x = horizontal ? x0 + k : x0;
-      const y = horizontal ? y0 : y0 + k;
-      if (columns.has(skey(x, y))) { cells.length = 0; break; }
-      cells.push({ x, y });
-    }
-    if (!cells.length) continue;
+    // 한 칸이라도 겹치면 통째로 버린다. 겹친 칸만 빼면 남은 것이 두 동강 나
+    // "한 줄로 이어진 다리" 라는 성질이 조용히 깨진다.
+    if (cells.length < 3) continue;
+    if (cells.some((c) => columns.has(skey(c.x, c.y)))) continue;
 
     for (const c of cells) columns.add(skey(c.x, c.y));
     bridges.push({ cells, z: lid });
   }
+  if (!bridges.length) return null;
 
-  // z=0 뿐이라 가림이 없다. 기둥만 피하면 그릴 수 있다.
-  const free = (x, y) => inBounds(x, y, gridW, gridH) && !columns.has(skey(x, y));
+  // 기둥도 화면 자리도 미리 깔린 다리를 침범하면 안 된다. 화면 자리가 겹치면
+  // 뜬판이 그 다리를 덮어 공짜 길이 하나 사라지고, 기둥이 겹치면 한 (x,y) 에
+  // 판이 둘이 되어 3단계에서 막아 둔 조회 유일성이 깨진다. scatter 가 taken
+  // 하나로 둘 다 본다.
+  const taken = new Set(columns);
+  const floats = scatter(rng, pick(rng, ...GROWTH[depth].floats),
+                         FLOAT_LIFT, FLOAT_LEN, gridW, gridH, taken);
+  if (floats.length < 2) return null;
+
+  // 뜬판이 있으므로 이제 가림이 있다. 기둥과 화면 자리를 둘 다 피해야 그릴 수 있다.
+  const free = (x, y) => inBounds(x, y, gridW, gridH) && !taken.has(skey(x, y));
 
   // 시작과 목표는 서로 멀어야 배급량이 난이도가 된다.
   const spots = [];
@@ -218,27 +388,95 @@ function honestLayout(rng, gridW, gridH, minCells) {
   }
   if (spots.length < 2) return null;
 
-  let best = null;
+  // 뜬판이 지름길이 될 만한 쌍을 먼저 쳐낸다.
+  //
+  // 판을 a 로 올라타 b 로 내려온다고 하면 그렇게 가는 값은
+  // d(start,a) + d(b,goal) − 1 이다 — 판 위는 공짜라 몇 칸을 밟든 값이 같고,
+  // 아끼는 것은 올라탄 칸 하나뿐이다. 직행이 k = d(start,goal) 이므로
+  //
+  //   아끼는 양 ≤ d(a,b) − detour(a) + 1,   detour(s) = d(start,s) + d(s,goal) − k
+  //
+  // 이고 한 줄 보행이라 d(a,b) ≤ N−1 이다. 그러므로 모든 칸의 detour 가 N 이상
+  // 이면 어떻게 올라타도 한 칸도 못 아낀다. N=1 에 detour 0 이면 딱 한 칸을
+  // 아끼는데, 3단계에서 상한 1 로 실측했을 때 층을 죽인 것이 그 한 칸이었다.
+  //
+  // **다만 이 계산은 미리 깔린 다리가 없을 때의 것이다.** 다리는 공짜라 실제
+  // 값이 맨해튼 거리가 아니게 되고, 그 틈으로 지름길이 되는 층이 100개 중 6개
+  // 새어 나갔다. 그래서 여기서 끝내지 않고 아래에서 솔버에게 직접 묻는다.
+  // 판마다 N 이 다르므로 자기 길이로 잰다. 긴 판일수록 더 멀리 비켜 있어야 한다.
+  const detourOf = (a, b) => {
+    const k = dist(a, b);
+    return floats.reduce((worst, f) => Math.min(worst,
+      f.span.reduce((m, s) => Math.min(m, dist(a, s) + dist(s, b) - k - f.cells.length),
+                    Infinity)), Infinity);
+  };
+
+  const pairs = [];
   for (const a of spots) {
     for (const b of spots) {
-      const d = Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
-      if (!best || d > best.d) best = { start: a, goal: b, d };
+      // 여기 미리 깔린 다리는 z=0 이라 정직하게 밟힌다. 그만큼 그리기 값이
+      // 맨해튼 거리보다 싸지므로 여유를 얹어 잡는다.
+      const d = dist(a, b);
+      if (d < minCells + 6) continue;
+      if (detourOf(a, b) < 0) continue;
+
+      pairs.push({ start: a, goal: b, d });
     }
   }
-  // 여기 미리 깔린 다리는 z=0 이라 정직하게 밟힌다. 그만큼 그리기 값이
-  // 맨해튼 거리보다 싸지므로 여유를 얹어 잡는다.
-  if (!best || best.d < minCells + 6) return null;
+  if (!pairs.length) return null;
+
+  // 먼 쌍부터 본다. 멀수록 배급량이 난이도로 일한다.
+  pairs.sort((p, q) => q.d - p.d);
+
+  // 솔버에게 직접 묻는다.
+  //
+  // 판정을 여기로 끌어온 것이 아니라 **배치를 정하는 것**이다. 층이 좋은지가
+  // 아니라 이 자리에 시작과 목표를 놓아도 뜬판이 놀고 있는지를 묻고, 아니라고
+  // 하면 다음 쌍으로 넘어간다. 층의 좋고 나쁨은 verify 가 따로 판정한다.
+  //
+  // 맨해튼으로만 거르고 판정에 맡기면 걸릴 때마다 지형을 통째로 버리게 되어
+  // 루프가 길어진다. 착시 층에서 minCells 를 미리 보는 것과 같은 이유다.
+  const laidCells = [
+    ...bridges.flatMap((f) => f.cells.map((c) => ({ x: c.x, y: c.y, z: lid }))),
+    ...floats.flatMap((f) => f.cells.map((c) => ({ x: c.x, y: c.y, z: f.z }))),
+  ];
+
+  let best = null;
+
+  for (const p of pairs.slice(0, PLACE_TRIES)) {
+    const from = { x: p.start.x, y: p.start.y, z: 0 };
+    const cells = [from, ...laidCells];
+
+    const honest = minInk(cells, from, p.goal, { allowIllusion: false });
+    if (!honest) continue;
+
+    // 그리기만으로 가는 값이 너무 짧으면 층이라고 할 것이 없다. 맨해튼 거리로는
+    // 멀어도 미리 깔린 다리를 꿰면 짧아지므로, 여기서 실제 값으로 다시 본다.
+    if (honest.cost / INK_COST < minCells) continue;
+
+    // 뜬판이 한 방울이라도 값을 깎으면 그 쌍은 못 쓴다. verify 의
+    // ILLUSION_CHEAPER 와 같은 조건이고, 걸리기 전에 여기서 피한다.
+    const any = minInk(cells, from, p.goal);
+    if (!any || any.cost < honest.cost) continue;
+
+    best = { ...p, detour: detourOf(p.start, p.goal) };
+    break;
+  }
+  if (!best) return null;
 
   const laid = bridges.reduce((n, f) => n + f.cells.length, 0);
+  const up = floats.reduce((n, f) => n + f.cells.length, 0);
 
   return {
     intent: 'honest',
     start: best.start,
     goal: best.goal,
     zMax: lid,
-    fixtures: bridges,
+    fixtures: [...bridges, ...floats.map((f) => ({ cells: f.cells, z: f.z }))],
     note: `높이 상한을 0 으로 조였다. 올릴 수 있는 판이 없으니 맞출 정렬도 ` +
-          `없다. 대신 바닥에 ${laid}칸을 미리 깔아 두었다.`,
+          `없다. 바닥에 ${laid}칸을 미리 깔고, 뜬판 ${floats.length}개 ${up}칸을 ` +
+          `z=${floats.map((f) => f.z).join('·')} 로 띄웠다 — 경로에서 ` +
+          `${best.detour}칸 더 비켜 있어 딛고 돌아도 한 칸을 못 아낀다.`,
   };
 }
 
@@ -258,21 +496,26 @@ export function design(brief = {}, rng = makeRng(1)) {
     gridH = GRID_H,
     zMax = Z_MAX,
     minCells = MIN_CELLS,
+    // 얼마나 얹을 것인가. 부르는 쪽이 안 적어 내면 다 자란 판으로 본다 —
+    // 익히는 판은 판단해서 내주는 것이지 기본값이 아니다.
+    depth = 1,
     tries = 40,
   } = brief;
 
   for (let i = 0; i < tries; i++) {
     const c = intent === 'honest'
-      ? honestLayout(rng, gridW, gridH, minCells)
-      : illusionLayout(rng, gridW, gridH, zMax, minCells);
+      ? honestLayout(rng, gridW, gridH, minCells, depth)
+      : illusionLayout(rng, gridW, gridH, zMax, minCells, depth);
 
     if (!c) continue;
-    if (!c.fixtures.every((f) => fixtureOk(f, c.zMax))) continue;
+    // 상한은 그 층의 zMax 가 아니라 Z_MAX 다. 정직 층의 뜬판은 플레이어 상한
+    // 위에 있고, 그래도 되는 이유는 pickAt 이 zTop 까지 훑기 때문이다(stage.js).
+    if (!c.fixtures.every((f) => fixtureOk(f, Z_MAX))) continue;
 
     // 이음매를 쓰는 층은 그것이 정직하게 붙지 않는 것까지 지켜야 한다.
     // 착시를 강제하는 층과 고르게 하는 층 둘 다 여기 걸린다 — 어느 쪽이든
     // "그리기만으로 가면 얼마인가" 가 정확해야 판정이 성립한다.
-    if (intent !== 'honest' && !c.fixtures.every((f) => seamOk(f, c.zMax))) continue;
+    if (intent !== 'honest' && !c.fixtures.every((f) => seamOk(f, Z_MAX))) continue;
 
     // 지형은 같아도 무엇을 묻는 층인지는 지시가 정한다.
     // illusionLayout 이 붙여 둔 이름을 그대로 두면 고르게 하려고 낸 층이

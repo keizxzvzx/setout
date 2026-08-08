@@ -177,9 +177,14 @@ const marked = () => {
 }
 
 // ---------------------------------------------------------------------------
-// 5. 상한이 0 인 층에는 아예 생기지 않는다
+// 5. 상한이 0 인 층에도 사각지대는 생긴다
 //
-// 정직 층은 판을 올릴 수 없으므로 사각지대도 없어야 한다.
+// 정직 층은 플레이어가 판을 못 올린다. 그런데 디렉터가 뜬판을 하나 얹으므로
+// 그 기둥은 여전히 잡혀 있다. 여기가 위험한 자리다 — 플레이어에게는 올릴 수
+// 있는 판이 하나도 없으므로 "내가 저기서 올렸지" 로 설명할 길이 아예 없고,
+// 표시가 없으면 잉크는 남았는데 선만 안 나오는 칸으로만 보인다.
+//
+// 상한이 0 이라고 발자국을 건너뛰면 정확히 그 증상이 나온다.
 // ---------------------------------------------------------------------------
 {
   const r = directFor({ inkSpent: 30, redraws: 0, illusionSteps: 6, realSteps: 20 },
@@ -187,8 +192,20 @@ const marked = () => {
   buildStage(r.spec);
 
   check('정직 층은 상한이 0', stage.zMax === 0, `${stage.zMax}`);
-  check('그러니 발자국도 없다', draw().strokes === 0);
-  check('사각지대도 없다', deadZones().length === 0);
+  check('그래도 그 위에 뜬판이 있다', stage.zTop > stage.zMax,
+        `zMax=${stage.zMax} zTop=${stage.zTop}`);
+
+  const dead = deadZones();
+  check('그 기둥은 사각지대다', dead.length > 0, `${dead.length}칸`);
+  check('전부 발자국으로 표시된다', dead.every((k) => marked().has(k)),
+        `${draw().strokes}획`);
+
+  // 상한이 0 인 층에서도 pickAt 이 그 판을 집어야 한다. 못 집으면 화면에는
+  // 보이는데 지울 수도 집을 수도 없는 판이 되어 세 경로가 보는 것이 갈린다.
+  const float = board.plates.find((p) => p.z > 0);
+  check('뜬판을 pickAt 이 집는다',
+        !!float && !!pickAt(float.cells[0].x - float.z, float.cells[0].y - float.z),
+        `z=${float?.z}`);
 }
 
 // ---------------------------------------------------------------------------

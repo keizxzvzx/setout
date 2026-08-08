@@ -102,8 +102,12 @@ export function plateAt(x, y) {
 //
 // 휠·지우기·하이라이트가 전부 이 함수를 쓰고, 5단계의
 // "겹친 후보 중 실제로 보이는 것" 도 같은 함수다.
+// zTop 까지 훑는다. 플레이어 상한(zMax)이 아니다 — 정직 층은 상한이 0 인데
+// 그 위에 뜬 구조물이 있고, 상한까지만 훑으면 그 판은 화면에 보이는데 집을
+// 수도 지울 수도 없는 것이 된다. 렌더와 솔버는 zTop 을 보므로 여기만 낮으면
+// 세 경로가 보는 것이 갈린다.
 export function pickAt(gx, gy) {
-  for (let z = stage.zMax; z >= Z_MIN; z--) {
+  for (let z = stage.zTop; z >= Z_MIN; z--) {
     const x = gx + z;
     const y = gy + z;
     if (!inBounds(x, y)) continue;

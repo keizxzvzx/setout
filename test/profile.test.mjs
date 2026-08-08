@@ -143,8 +143,14 @@ const PUSHER = stats({ inkSpent: 118, illusionSteps: 0, realSteps: 40, redraws: 
   const v = verify(seeker.candidate, seeker.inkMax);
   check('그 층에서는 착시가 값을 못 깎는다', v.illusionCost === v.honestCost,
         `착시 ${v.illusionCost} / 그리기 ${v.honestCost}`);
-  check('올려 둔 판이 하나도 없다',
-        candidateCells(seeker.candidate).every((c) => c.z === 0));
+  // 판이 전부 바닥에 누워 있으면 그 장에서만 화면이 평평하다. 뜬판을 하나
+  // 얹되 값을 못 깎는 자리에만 두었으므로, 위의 두 줄과 이 줄이 같이 성립해야
+  // 한다 — 떠 있는데 놀고 있는 판이다.
+  const lifted = candidateCells(seeker.candidate).filter((c) => c.z > 0);
+  check('그래도 뜬판은 하나 있다', lifted.length > 0,
+        `${lifted.length}칸 z=${lifted[0]?.z}`);
+  check('플레이어는 그것을 못 따라 만든다 — 상한이 0 이므로',
+        seeker.spec.zMax === 0 && lifted.every((c) => c.z > seeker.spec.zMax));
 
   const pusher = directFor(PUSHER, { granted: 120, stages: 2 }, 4);
   const w = verify(pusher.candidate, pusher.inkMax);

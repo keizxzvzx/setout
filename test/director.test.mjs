@@ -81,12 +81,30 @@ const HONEST = batch('honest');
 {
   const all = [...ILLUSION, ...HONEST];
 
-  const overCap = all.filter(({ c }) => c.fixtures.some((f) => !fixtureOk(f, c.zMax)));
-  check('구조물이 그 층의 상한 안에 있다', overCap.length === 0,
+  const overCap = all.filter(({ c }) => c.fixtures.some((f) => !fixtureOk(f, C.Z_MAX)));
+  check('구조물이 Z_MAX 안에 있다', overCap.length === 0,
         overCap.length ? `시드 ${overCap[0].seed}` : `${all.length}층 확인`);
-  check('상한 위에 놓인 구조물이 없다',
-        !all.some(({ c }) => c.fixtures.some((f) => f.z > c.zMax)),
-        '있으면 pickAt 은 못 집는데 솔버는 길로 센다');
+
+  // 예전에는 "구조물의 z 가 그 층의 zMax 이하" 를 지켰다. pickAt 이 zMax 까지만
+  // 훑었으므로 넘기면 화면에는 보이는데 못 집는 판이 됐기 때문이다.
+  //
+  // 정직 층에 뜬판을 놓으면서 그 규칙을 버렸다. 대신 stage 가 zTop 을 파생시켜
+  // pickAt 과 카메라가 그것을 읽는다. 지켜야 할 것은 처음부터 z 의 크기가 아니라
+  // **놓은 것을 전부 집을 수 있는가** 였으므로, 이제 그것을 직접 본다.
+  let unreachable = 0;
+  let cropped = 0;
+
+  for (const { c } of all) {
+    const s = makeStage(toStageSpec(c, 60));
+    for (const f of c.fixtures) {
+      if (f.z > s.zTop) unreachable++;
+      if (f.z + 1 > s.zTop + 1) cropped++;
+    }
+  }
+
+  check('구조물이 전부 zTop 안에 든다 — pickAt 이 훑는 범위다', unreachable === 0,
+        `${unreachable}건`);
+  check('카메라 여유가 가장 높은 구조물을 덮는다', cropped === 0, `${cropped}건`);
 
   // 착시 층에만 걸리는 규칙. 이음매가 z=0 이면 그린 판과 정직하게 붙어
   // "정직하게만 가면 얼마인가" 가 거짓말이 된다.
@@ -94,9 +112,17 @@ const HONEST = batch('honest');
   check('착시 층의 이음매는 바닥에 눕지 않는다', flatSeam.length === 0,
         flatSeam.length ? `시드 ${flatSeam[0].seed}` : `${ILLUSION.length}층 확인`);
 
-  // 정직 층은 반대다. 구조물이 공짜 길이어야 하므로 바닥에 눕는다.
-  const lifted = HONEST.filter(({ c }) => c.fixtures.some((f) => f.z !== 0));
-  check('정직 층의 구조물은 전부 바닥에 눕는다', lifted.length === 0,
+  // 정직 층은 길 노릇을 하는 것만 바닥에 눕는다. 공짜 길이어야 하기 때문이다.
+  // 그 위에 길이 아닌 뜬판이 둘 이상 얹힌다 — 판이 전부 누워 있으면 그 장에서만
+  // 화면이 평평하고, 하나뿐이면 그것이 곧 정답이라 고를 것이 없다.
+  // 값을 깎지 않는다는 것은 7번에서 따로 잰다.
+  const floats = HONEST.map(({ c }) => c.fixtures.filter((f) => f.z > 0).length);
+  check('정직 층에 뜬판이 둘 이상 있다', floats.every((n) => n >= 2),
+        `가장 적은 층 ${Math.min(...floats)}개`);
+
+  const walkable = HONEST.filter(({ c }) =>
+    c.fixtures.filter((f) => f.z === 0).length < 1);
+  check('길 노릇을 하는 구조물은 여전히 바닥에 눕는다', walkable.length === 0,
         '올리면 벽이 아니라 공짜 징검다리가 된다');
 }
 
@@ -231,9 +257,19 @@ const HONEST = batch('honest');
 
   check(`착시로 질러갈 수 있는 층이 없다 (${sameCost}층)`, cheaper === 0, `${cheaper}건`);
 
-  const anyLifted = HONEST.some(({ c }) =>
-    candidateCells(c).some((cell) => cell.z !== 0));
-  check('정직 층에는 z 가 0 이 아닌 칸이 아예 없다', !anyLifted);
+  // 뜬판은 있지만 착시 간선을 쓸 이유를 주지 않는다. 위의 두 값이 같다는 것이
+  // 그 증거이고(착시로 질러갈 수 있는 층이 없다), 여기서는 그 판이 실제로 떠
+  // 있는지를 확인한다 — 없으면 위의 등식은 그냥 z 가 전부 0 이라 성립한 것이다.
+  const lifted = HONEST.filter(({ c }) =>
+    candidateCells(c).some((cell) => cell.z > 0));
+  check('그 등식이 뜬판이 있는 채로 성립한다', lifted.length === HONEST.length,
+        `${lifted.length}/${HONEST.length}층에 뜬판이 있다`);
+
+  // 플레이어는 그것을 따라 만들 수 없다. 상한이 0 이라 자기 판을 못 올린다.
+  const reachable = HONEST.filter(({ c }) =>
+    c.fixtures.some((f) => f.z > 0 && f.z <= c.zMax));
+  check('플레이어가 맞출 수 있는 높이가 아니다', reachable.length === 0,
+        `${reachable.length}건`);
 }
 
 // ---------------------------------------------------------------------------
