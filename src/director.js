@@ -854,7 +854,10 @@ export function direct(brief = {}, seed = 1, opts = {}) {
     if (v.illusionCost !== null) fallback = { candidate, inkMax: v.illusionCost };
 
     if (v.ok) {
-      const window = budgetWindow(v);
+      // judge 를 여기에도 넘긴다. verify 와 budgetWindow 가 같은 여유를 봐야
+      // 한다 — 한쪽만 바꾸면 창 바닥이 판정 문턱과 어긋나, 창 안에서 고른
+      // 값이 곧바로 재판정에서 떨어지는 상태가 나온다.
+      const window = budgetWindow(v, judge);
       const chosen = pickBudget(window, slack);
 
       // 창 안의 값은 반드시 통과한다. 그래도 확인하고 넘어간다 — 창 계산이
