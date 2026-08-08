@@ -37,6 +37,15 @@ function resize() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   fitView(viewW, viewH);
+
+  // 창이 아직 그려지지 않은 채로 로드되면 innerWidth 가 0 이다. 그러면 캔버스가
+  // 0×0 으로 잡히고 fitView 의 배율이 음수가 되어, 리사이즈 이벤트가 올 때까지
+  // 빈 화면이 남는다. 오류가 아니라 아무것도 안 나오는 것이라 원인도 안 보인다.
+  //
+  // 재는 것을 미루지는 않는다 — beginRun 이 iso 에 잡힌 크기를 필요로 하므로
+  // 지금 한 번은 잡아 두고, 크기가 생기면 다시 잰다. 탭이 숨어 있으면 rAF 가
+  // 안 돌지만 그때는 그릴 것도 없고, 보이는 순간 재개되어 저절로 맞는다.
+  if (!viewW || !viewH) requestAnimationFrame(resize);
 }
 
 // 탭이 뒤로 갔다 오면 프레임 간격이 몇 초로 벌어진다.
